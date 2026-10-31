@@ -397,7 +397,7 @@ dialog.small-dialog { width: min(400px, calc(100% - 24px)); }
 
 /* ------------------------------------------------------------ slicer */
 .in-slicer main { max-width: none; padding-bottom: 12px; }
-.sl-wrap { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 14px; height: calc(100dvh - 59px - 28px); min-height: 460px; }
+.sl-wrap { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 14px; height: calc(100dvh - 59px - 28px); min-height: 300px; }
 .sl-stage {
   position: relative; border-radius: var(--radius); overflow: hidden; border: 1px solid var(--line);
   background: radial-gradient(ellipse at 50% 30%, #3a3f47 0%, #1d2025 75%); touch-action: none; min-height: 0;

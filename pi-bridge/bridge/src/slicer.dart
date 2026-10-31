@@ -587,6 +587,19 @@ class Slicer {
         j.message = 'Took too long, stopped.';
         p.kill();
       });
+      // Memory watch, every 2 s: what the engine uses (RAM + swap) and what the board has left, for
+      // the progress box; and the brake: once the board is out of RAM and the engine is deep in
+      // swap, it is stopped (the service's swap cap does the same; this also works without cgroups).
+      var swapKilled = false;
+      final memTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+        final m = engineMemory(p.pid);
+        if (m == null) return;
+        j.mem = m;
+        if (m['avail']! < 64 && m['swap']! > 512) {
+          swapKilled = true;
+          p.kill(ProcessSignal.sigkill);
+        }
+      });
       final err = p.stderr.transform(utf8.decoder).forEach(log.write);
       await p.stdout.transform(utf8.decoder).transform(const LineSplitter()).forEach((line) {
         log.writeln(line);
@@ -594,12 +607,15 @@ class Slicer {
       });
       final code = await p.exitCode;
       timer.cancel();
+      memTimer.cancel();
       await err;
       if (j.state == 'cancelled') return;
       final g = File('${j.dir}/out/plate_1.gcode');
-      if (code == -9 && !timedOut) {
-        j.fail('The board ran out of memory slicing this plate. Put fewer models on it, use a larger layer height, '
-            'or simplify very detailed models, then try again.');
+      if ((code == -9 && !timedOut) || swapKilled) {
+        final peak = j.mem?['peak'];
+        host.log.warn('Slicer out of memory on ${j.name}${peak != null ? ' (peak ${peak} MB)' : ''}${swapKilled ? ', stopped by the swap brake' : ''}');
+        j.fail('The board ran out of memory slicing this plate. Set Lighter G-code to Always (Quality card), '
+            'use a larger layer height, or put fewer models on the plate, then try again.');
         return;
       }
       if (code != 0 || !g.existsSync()) {
@@ -757,6 +773,7 @@ class SliceJob {
   Map<String, dynamic> stats = {};
   final List<String> warnings = [];
   Process? process;
+  Map<String, int>? mem; // engine memory (MB): rss, swap, peak; avail = what the board has left
 
   final int plate;
   SliceJob({required this.name, required this.printerId, required this.dir, this.plate = 1});
@@ -820,7 +837,24 @@ class SliceJob {
         'stats': stats,
         'seconds': (finished ?? DateTime.now()).difference(started).inSeconds,
         'hasProject': project != null,
+        if (mem != null) 'mem': mem,
       };
+}
+
+/// Memory of the engine process (MB): rss (in RAM), swap, peak (most RAM so far), and avail
+/// (what the whole board still has free, from /proc/meminfo). Null when it cannot be read.
+Map<String, int>? engineMemory(int pid) {
+  try {
+    final st = File('/proc/$pid/status').readAsStringSync();
+    int kb(String key, String text) {
+      final m = RegExp('^$key:\\s+(\\d+) kB', multiLine: true).firstMatch(text);
+      return m == null ? 0 : int.parse(m.group(1)!) ~/ 1024;
+    }
+    final mi = File('/proc/meminfo').readAsStringSync();
+    return {'rss': kb('VmRSS', st), 'swap': kb('VmSwap', st), 'peak': kb('VmHWM', st), 'avail': kb('MemAvailable', mi), 'total': kb('MemTotal', mi)};
+  } catch (_) {
+    return null;
+  }
 }
 
 // ------------------------------------------------------------------ pure helpers (tested)

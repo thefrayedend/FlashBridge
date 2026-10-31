@@ -2048,7 +2048,10 @@ async function poll(i) {
   S.res[i] = S.res[i] || { key: '', g: null };
   S.res[i].job = j;
   if (j.state === 'slicing') {
-    busy(`Slicing plate ${i + 1} on the board…`, `${j.message || ''} (${j.seconds}s)${queue.length ? ` · ${queue.length} more plate(s) waiting` : ''}`, j.percent, true);
+    // memory line: what the engine uses (RAM + swap) and what the board still has free
+    const m = j.mem, gb = (mb) => (mb / 1024).toFixed(1);
+    const mem = m ? ` · memory ${gb(m.rss + m.swap)} GB${m.swap > 50 ? ` (${gb(m.swap)} in swap)` : ''}, ${gb(m.avail)} GB free` : '';
+    busy(`Slicing plate ${i + 1} on the board…`, `${j.message || ''} (${j.seconds}s)${mem}${queue.length ? ` · ${queue.length} more plate(s) waiting` : ''}`, j.percent, true);
     pollTimer = setTimeout(() => poll(i), 700);
     return;
   }
