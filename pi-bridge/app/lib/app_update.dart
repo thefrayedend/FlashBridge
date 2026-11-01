@@ -9,7 +9,7 @@ import 'board.dart';
 import 'native.dart';
 
 /// Where GitHub Actions publishes the app (pi-bridge/app/ci/build-apk.sh).
-const appReleaseBase = 'https://github.com/thefrayedend/ffbridge-pi/releases/download/latest-app';
+const appReleaseBase = 'https://github.com/thefrayedend/FlashBridge/releases/download/latest-app';
 
 class AppUpdate {
   static bool _running = false;

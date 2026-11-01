@@ -19,6 +19,7 @@ setup page, Spoolman, Discord, and AI print-failure detection (Obico model, runs
 
 ## What's new
 
+- **New home on GitHub:** the project is now called FlashBridge on GitHub (https://github.com/thefrayedend/FlashBridge). Updates come from there; boards and phones on older versions follow the move by themselves.
 - **Prints are sent exactly like OrcaSlicer sends them:** the board now uploads the file with "print now", bed levelling and the filament-to-slot mapping in one request, with the same settings OrcaSlicer's Flashforge sender uses, instead of uploading first and starting it separately. It never starts the printer's own copy of a file (that could be an older slice, or a broken copy left by a cut-off upload).
 - **The sliced file matches OrcaSlicer's:** no copy of the 3D model inside (much smaller), the 140x110 printer thumbnail inside the G-code, both plate pictures the file refers to (one was missing), and the print time as the file's first line, which OrcaSlicer's current Flashforge profiles add for the printer. This fixes "print file error" on the printer after it unpacked a board-sliced file.
 - **The page shows every step of starting a print:** sending the file (with %), the printer unpacking it, then printing, with a timer, instead of "Ready". If the printer refuses the file or hangs up, the message says what it answered instead of "Broken pipe".
