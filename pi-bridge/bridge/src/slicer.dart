@@ -1130,32 +1130,60 @@ Uint8List? decodePngDataUrl(String s) {
 /// Copies [src] to [dst] with a PrusaSlicer-style thumbnail block after the header, so the
 /// file list, the print dialog and the printer show a picture of the plate.
 Future<void> addThumbnail(File src, File dst, Uint8List? png) async {
-  if (png == null) {
-    await src.copy(dst.path);
-    return;
-  }
-  final w = (png[16] << 24) | (png[17] << 16) | (png[18] << 8) | png[19];
-  final h = (png[20] << 24) | (png[21] << 16) | (png[22] << 8) | png[23];
-  final b64 = base64.encode(png);
-  // byte for byte OrcaSlicer's block (GCodeThumbnails::export_thumbnails_to_file), right after the header
-  final block = StringBuffer('\n; THUMBNAIL_BLOCK_START\n\n;\n; thumbnail begin ${w}x$h ${b64.length}\n');
-  for (var i = 0; i < b64.length; i += 78) {
-    block.writeln('; ${b64.substring(i, i + 78 > b64.length ? b64.length : i + 78)}');
-  }
-  block.write('; thumbnail end\n; THUMBNAIL_BLOCK_END\n');
+  // OrcaSlicer's Flashforge profiles start the file with the print time ("file_start_gcode"), which
+  // the printer's firmware reads; the engine's older profiles lack it, so it is added here.
+  final first = fileStartLine(src);
   final raf = await src.open();
   final head = await raf.read(65536);
   await raf.close();
-  final text = latin1.decode(head);
-  const marker = '; HEADER_BLOCK_END';
-  var at = text.indexOf(marker);
-  at = at < 0 ? 0 : text.indexOf('\n', at) + 1;
   final out = dst.openWrite();
-  out.add(head.sublist(0, at));
-  out.add(latin1.encode(block.toString()));
-  out.add(head.sublist(at));
+  if (first != null && !latin1.decode(head.sublist(0, head.length < 200 ? head.length : 200)).startsWith('; estimated printing time')) {
+    out.add(latin1.encode('$first\n'));
+  }
+  if (png == null) {
+    out.add(head);
+  } else {
+    final w = (png[16] << 24) | (png[17] << 16) | (png[18] << 8) | png[19];
+    final h = (png[20] << 24) | (png[21] << 16) | (png[22] << 8) | png[23];
+    final b64 = base64.encode(png);
+    // byte for byte OrcaSlicer's block (GCodeThumbnails::export_thumbnails_to_file), right after the header
+    final block = StringBuffer('\n; THUMBNAIL_BLOCK_START\n\n;\n; thumbnail begin ${w}x$h ${b64.length}\n');
+    for (var i = 0; i < b64.length; i += 78) {
+      block.writeln('; ${b64.substring(i, i + 78 > b64.length ? b64.length : i + 78)}');
+    }
+    block.write('; thumbnail end\n; THUMBNAIL_BLOCK_END\n');
+    final text = latin1.decode(head);
+    const marker = '; HEADER_BLOCK_END';
+    var at = text.indexOf(marker);
+    at = at < 0 ? 0 : text.indexOf('\n', at) + 1;
+    out.add(head.sublist(0, at));
+    out.add(latin1.encode(block.toString()));
+    out.add(head.sublist(at));
+  }
   await out.addStream(src.openRead(head.length));
   await out.close();
+}
+
+/// "; estimated printing time (normal mode) = 2d 5h 4m 36s": OrcaSlicer's Flashforge file_start_gcode
+/// ("{print_time_day}d {print_time_hour}h {print_time_minute}m {print_time_sec}s"), from the time the
+/// engine wrote at the end of [f]. Null when the G-code has no time.
+String? fileStartLine(File f) {
+  final len = f.lengthSync();
+  final raf = f.openSync();
+  try {
+    final from = len > 400000 ? len - 400000 : 0;
+    raf.setPositionSync(from);
+    final tail = latin1.decode(raf.readSync(len - from));
+    final m = RegExp(r'^; estimated printing time \(normal mode\) = (.+)$', multiLine: true).firstMatch(tail);
+    if (m == null) return null;
+    var secs = 0;
+    for (final p in RegExp(r'(\d+)\s*([dhms])').allMatches(m.group(1)!)) {
+      secs += int.parse(p.group(1)!) * const {'d': 86400, 'h': 3600, 'm': 60, 's': 1}[p.group(2)]!;
+    }
+    return '; estimated printing time (normal mode) = ${secs ~/ 86400}d ${secs % 86400 ~/ 3600}h ${secs % 3600 ~/ 60}m ${secs % 60}s';
+  } finally {
+    raf.closeSync();
+  }
 }
 
 /// Print time, filament per extruder and layer count from the G-code's closing comments.
@@ -1168,9 +1196,10 @@ Map<String, dynamic> gcodeStats(File f) {
   raf.setPositionSync(0);
   final head = latin1.decode(raf.readSync(len < 4000 ? len : 4000));
   raf.closeSync();
+  // the engine's closing summary (the last match: the file may also start with the print time)
   String? val(String text, String key) {
-    final m = RegExp('^; ${RegExp.escape(key)} = (.*)\$', multiLine: true).firstMatch(text);
-    return m?.group(1)?.trim();
+    final all = RegExp('^; ${RegExp.escape(key)} = (.*)\$', multiLine: true).allMatches(text);
+    return all.isEmpty ? null : all.last.group(1)?.trim();
   }
 
   List<double> nums(String? s) => s == null ? [] : s.split(',').map((x) => double.tryParse(x.trim()) ?? 0).toList();

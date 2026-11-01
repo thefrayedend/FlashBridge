@@ -67,6 +67,7 @@ Future<void> main() async {
   final out = File('${dir.path}/b.gcode');
   await addThumbnail(g, out, png);
   final t = out.readAsStringSync();
+  check('first line is OrcaSlicer\'s Flashforge print time', t.startsWith('; estimated printing time (normal mode) = 0d 1h 2m 3s\n; HEADER_BLOCK_START'), t.substring(0, 80));
   check('thumbnail after the header', t.indexOf('; thumbnail begin 2x2') > t.indexOf('; HEADER_BLOCK_END') && t.contains('G1 X1 Y1 E1'));
   final md = await extractGcodeMetadata(out);
   check('bridge reads the thumbnail back', md.thumbs.isNotEmpty && md.thumbs.first.width == 2, md.thumbs.length);
