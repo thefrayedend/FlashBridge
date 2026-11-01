@@ -12,6 +12,7 @@ import { simplifyModel, SIMPLIFY_AT } from './simplify.js';
 import { OBJLoader } from './vendor/OBJLoader.js';
 import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast, INTERSECTED, NOT_INTERSECTED, CONTAINED } from './vendor/three-mesh-bvh.js';
 import { import3mf, export3mf, subdivide, pieceCentres, decodeTree, stateAt, encodeTree } from './project3mf.js';
+import { unzipSync } from './vendor/fflate.js';
 import { parseGcode, FEATURES } from './gcode.js';
 import * as P from './paint.js';
 
@@ -62,6 +63,80 @@ const SIMPLE = [
 ];
 /** Plates with this many triangles or more get lighter G-code when that setting is Auto. */
 const LIGHT_AT = 200000;
+
+// ------------------------------------------------------------------ memory estimate (layer height guard)
+// How much memory the engine will need for a plate, worked out before slicing so the page can stop
+// layer heights the board cannot slice. Fitted to measured slices of a 1M-triangle painted helmet and
+// a 200k-triangle vase (lean engine v0.1.0-dev-19-ffb1, x86_64; the board needs ~10% less):
+//   GB = 0.45 (engine + profiles) + 0.23 per million triangles
+//      + 3.73e-5 * surface (cm²) / layer height (mm)          walls and infill, every layer
+//        (x1.05 gyroid infill, x2.2 without Lighter G-code: arcs are stored per path)
+//      + 9.33e-6 * support column (cm³) * layer height^-1.5    supports: projected overhang area x
+//        height above the plate; painted area only when supports are "only where painted"
+// Within 3% of every measured slice (0.08 to 0.2 mm, with and without supports).
+const MEM = { base: 0.45, perMTri: 0.23, wall: 3.73e-5, gyroid: 1.05, noLight: 2.2, sup: 9.33e-6, supExp: 1.5 };
+/** Memory the engine may use on this board (GB): the board's RAM less what the system keeps. */
+function memBudget() { const mb = S.memMB || 3847; return (mb - 450) / 1024; }
+let featCache = { key: '', f: null };
+/** Size and shape numbers of a plate, as placed: triangles, surface (cm²), support columns (cm³). */
+function plateFeatures(i) {
+  const list = platesObjects(i);
+  const thr = +valueOf('support_threshold_angle') || 30;
+  const key = JSON.stringify([i, thr, list.map((o) => { o.mesh.updateMatrixWorld(true); return [o.id, o.rev || 0, o.mesh.matrixWorld.elements.map((x) => Math.round(x * 1000))]; })]);
+  if (featCache.key === key) return featCache.f;
+  const lim = -Math.cos((90 - thr) * Math.PI / 180); // overhang: face normal points down more than this
+  let tris = 0, area = 0, col = 0, colPainted = 0;
+  for (const o of list) {
+    const m = o.mesh.matrixWorld.elements, p = o.orig, n = p.length / 9;
+    tris += n;
+    let zmin = Infinity;
+    for (let k = 2; k < p.length; k += 3) { const z = m[2] * p[k - 2] + m[6] * p[k - 1] + m[10] * p[k] + m[14]; if (z < zmin) zmin = z; }
+    const w = new Float32Array(9);
+    for (let t = 0; t < n; t++) {
+      for (let v = 0; v < 3; v++) {
+        const b = t * 9 + v * 3, x = p[b], y = p[b + 1], z = p[b + 2];
+        w[v * 3] = m[0] * x + m[4] * y + m[8] * z; w[v * 3 + 1] = m[1] * x + m[5] * y + m[9] * z; w[v * 3 + 2] = m[2] * x + m[6] * y + m[10] * z + m[14] - zmin;
+      }
+      const ax = w[3] - w[0], ay = w[4] - w[1], az = w[5] - w[2], bx = w[6] - w[0], by = w[7] - w[1], bz = w[8] - w[2];
+      const cx = ay * bz - az * by, cy = az * bx - ax * bz, cz = ax * by - ay * bx;
+      const a2 = Math.hypot(cx, cy, cz);
+      if (!a2) continue;
+      area += a2 / 2;
+      const nz = cz / a2, zc = (w[2] + w[5] + w[8]) / 3;
+      if (zc > 0.3 && nz < 0) {
+        const c = (a2 / 2) * -nz * zc; // projected area x height above the plate
+        if (nz < lim) col += c;
+        if (o.sup) { // painted enforcers count wherever they are (share of the triangle's pieces)
+          const lvl = o.levels[t], st = o.start[t], cnt = 4 ** lvl;
+          let e = 0;
+          for (let q = st; q < st + cnt; q++) if (o.sup[q] === 1) e++;
+          if (e) colPainted += c * e / cnt;
+        }
+      }
+    }
+  }
+  const f = { tris, area: area / 100, col: col / 1000, colPainted: colPainted / 1000 };
+  featCache = { key, f };
+  return f;
+}
+/** Estimated engine memory (GB) for plate i at layer height h, with the current settings. */
+function plateMemory(i, h, light) {
+  const f = plateFeatures(i);
+  if (!f.tris) return 0;
+  const supOn = /^(1|true)$/.test(String(valueOf('enable_support')));
+  const manual = /manual/.test(String(valueOf('support_type')));
+  if (light === undefined) light = S.light === 'on' || (S.light === 'auto' && f.tris >= LIGHT_AT);
+  const gy = /gyroid/.test(String(valueOf('sparse_infill_pattern')));
+  let gb = MEM.base + MEM.perMTri * f.tris / 1e6 + MEM.wall * f.area / h * (gy ? MEM.gyroid : 1) * (light ? 1 : MEM.noLight);
+  if (supOn) gb += MEM.sup * (manual ? f.colPainted : f.col) * h ** -MEM.supExp;
+  return gb;
+}
+/** The finest layer height (mm, 0.01 steps) this plate can be sliced at on this board; null = none fits. */
+function minLayerHeight(i) {
+  const max = Math.round(nozzleSize() * 75) / 100, budget = memBudget();
+  for (let h = 0.04; h <= max + 1e-9; h = +(h + 0.01).toFixed(2)) if (plateMemory(i, h) <= budget) return h;
+  return null;
+}
 // Enforcer / blocker colours (as in OrcaSlicer).
 const ENFORCE = '#2f7bff', BLOCK = '#e5383b', BASE = '#c9ccd1', OVERHANG = '#f2a33a';
 
@@ -104,6 +179,7 @@ export function init(ffb) {
 
 export async function show(mode) {
   const st = await F.api('slicer');
+  if (st.memTotalMB) S.memMB = st.memTotalMB;
   if (!st.installed) { showSetup(st); return; }
   $('#sl-setup').classList.add('hidden');
   $('#sl-wrap').classList.remove('hidden');
@@ -114,6 +190,7 @@ export async function show(mode) {
   if (mode === 'paint' && (!S.selected || S.selected.plate !== S.plate)) S.selected = platesObjects(S.plate)[0] || S.selected || S.objects[0] || null;
   applyMode();
   resize();
+  openInboxFromHash();
   const running = Object.values(st.jobs || {}).find((j) => j.state === 'slicing');
   if (running) { poll(running.plate - 1); return; }
   // a plate this page still thinks is slicing, but the board does not: find out (it shows a message)
@@ -121,6 +198,23 @@ export async function show(mode) {
   if (stale >= 0) { await poll(stale); return; }
   if (mode === 'preview' && S.info && S.info.known) previewPlate(S.plate);
 }
+
+/** A model sent from another device (the phone app): #slicer/prepare/inbox=<id> opens it once. */
+async function openInboxFromHash() {
+  const m = /inbox=([0-9a-f]{16})/.exec(location.hash);
+  if (!m) return;
+  history.replaceState(null, '', '#slicer/prepare');
+  await openInbox(m[1]);
+}
+async function openInbox(id) {
+  try {
+    const r = await fetch(`/api/slicer/inbox/${id}`, { cache: 'no-store' });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).message || 'not found');
+    const name = decodeURIComponent(r.headers.get('X-File-Name') || 'model.3mf');
+    await addFiles([new File([await r.blob()], name)]);
+  } catch (e) { F.toast('Could not open the file sent to the slicer: ' + e.message, true); }
+}
+window.ffbOpenInbox = (id) => { location.hash = '#slicer/prepare/inbox=' + id; };
 
 export function hide() { /* rendering stops by itself when nothing changes */ }
 
@@ -740,9 +834,27 @@ function autoOrient(o) {
 }
 
 // ================================================================== importing files
+/** The models inside a ZIP (Printables' "download all" and the like): 3MF, STL and OBJ, any folder. */
+async function unzipModels(file) {
+  const all = unzipSync(new Uint8Array(await file.arrayBuffer()), { filter: (f) => /\.(3mf|stl|obj)$/i.test(f.name) && !/(^|\/)(__MACOSX|\.)/.test(f.name) });
+  return Object.entries(all).map(([n, b]) => new File([b], n.split('/').pop()));
+}
 async function addFiles(files) {
   if (!files.length) return;
   if (S.mode !== 'prepare' && S.mode !== 'paint') location.hash = '#slicer/prepare';
+  // a ZIP brings its models in: they are opened like files picked one by one
+  const zips = files.filter((f) => /\.zip$/i.test(f.name));
+  if (zips.length) {
+    files = files.filter((f) => !zips.includes(f));
+    for (const z of zips) {
+      try {
+        const inner = await unzipModels(z);
+        if (!inner.length) F.toast(z.name + ': no 3MF, STL or OBJ models inside.', true);
+        files.push(...inner);
+      } catch (e) { F.toast(z.name + ': could not open the ZIP (' + e.message + ').', true); }
+    }
+    if (!files.length) return;
+  }
   for (const file of files) {
     const lower = file.name.toLowerCase();
     try {
@@ -1414,7 +1526,7 @@ const fmtVal = (v) => (Array.isArray(v) ? v[0] : v);
 function valueOf(key) { return S.overrides[key] !== undefined ? S.overrides[key] : (key === 'curr_bed_type' ? S.bedType : fmtVal(S.values[key])); }
 function settingRow(s, label, tip = false) {
   const key = s.key, v = String(valueOf(key) ?? ''), changed = S.overrides[key] !== undefined;
-  let input;
+  let input, tipLine = '';
   if (s.type === 'bool') input = `<input type="checkbox" data-ov="${key}" ${v === '1' || v === 'true' ? 'checked' : ''}>`;
   else if (s.type === 'enum') input = `<select data-ov="${key}">${s.enum.map((e) => `<option value="${esc(e.value)}" ${e.value === v ? 'selected' : ''}>${esc(e.label)}</option>`).join('')}</select>`;
   else if (s.type === 'percent') input = `<span class="unit-in"><input type="number" data-ov="${key}" data-pct value="${esc(v.replace('%', ''))}" ${s.min !== undefined ? `min="${s.min}"` : ''} ${s.max !== undefined ? `max="${s.max}"` : ''} step="${stepFor(v, 1)}"><span>%</span></span>`;
@@ -1423,10 +1535,19 @@ function settingRow(s, label, tip = false) {
     const cur = +v, list = layerHeights();
     if (cur && !list.includes(cur)) list.push(cur);
     list.sort((a, b) => a - b);
-    input = `<span class="unit-in"><select data-ov="${key}">${list.map((h) => `<option value="${h}" ${h === cur ? 'selected' : ''}>${h.toFixed(2)}</option>`).join('')}<option value="__other">Other…</option></select><span>mm</span></span>`;
+    // heights the board cannot slice this plate at (memory) are shown but cannot be picked
+    const min = platesObjects(S.plate).length ? minLayerHeight(S.plate) : 0;
+    const tooFine = (h) => min === null || (min && h < min - 1e-9);
+    input = `<span class="unit-in"><select data-ov="${key}">${list.map((h) => `<option value="${h}" ${h === cur ? 'selected' : ''} ${tooFine(h) && h !== cur ? 'disabled' : ''}>${h.toFixed(2)}${tooFine(h) ? ' – too fine' : ''}</option>`).join('')}<option value="__other">Other…</option></select><span>mm</span></span>`;
+    if (min !== 0) {
+      const est = plateMemory(S.plate, cur || 0.2);
+      tipLine = min === null
+        ? `<span class="tip mem warn">This plate needs more memory than the board has at any layer height${/^(1|true)$/.test(String(valueOf('enable_support'))) ? ': paint supports only where needed, or' : ':'} put fewer models on it.</span>`
+        : `<span class="tip mem ${tooFine(cur) ? 'warn' : ''}">Finest for this plate: ${min.toFixed(2)} mm (board memory). This setting needs about ${est.toFixed(1)} of ${memBudget().toFixed(1)} GB.</span>`;
+    }
   } else if (s.type === 'int' || s.type === 'float') input = `<span class="unit-in"><input type="number" data-ov="${key}" value="${esc(v)}" ${s.min !== undefined ? `min="${s.min}"` : ''} ${s.max !== undefined && s.max < 1e6 ? `max="${s.max}"` : ''} step="${s.type === 'int' ? 1 : stepFor(v)}" ${key === 'layer_height' ? 'autofocus' : ''}><span>${esc(s.unit || '')}</span></span>`;
   else input = `<input data-ov="${key}" value="${esc(v)}" title="${esc(s.unit || '')}">`;
-  return `<div class="sl-set ${changed ? 'changed' : ''}"><span class="nm" title="${esc(s.tooltip || '')}"><span>${esc(label || s.label)}</span>${changed ? `<button class="reset" data-reset="${key}" title="Back to the profile's value">↺</button>` : ''}</span>${input}${tip && s.tooltip ? `<span class="tip">${esc(s.tooltip)}</span>` : ''}</div>`;
+  return `<div class="sl-set ${changed ? 'changed' : ''}"><span class="nm" title="${esc(s.tooltip || '')}"><span>${esc(label || s.label)}</span>${changed ? `<button class="reset" data-reset="${key}" title="Back to the profile's value">↺</button>` : ''}</span>${input}${tip && s.tooltip ? `<span class="tip">${esc(s.tooltip)}</span>` : ''}${tipLine}</div>`;
 }
 
 /** Numbers as people type them: ".08" -> "0.08", "-.5%" -> "-0.5%", "2." -> "2". Anything else unchanged. */
@@ -1692,6 +1813,8 @@ async function onChange(e) {
       S.customLayer = false;
       if (!(+v > 0)) { F.toast('Layer height must be a number above 0 (for example 0.15).', true); renderSide(); return; }
       v = String(+(+v).toFixed(3));
+      const min = platesObjects(S.plate).length ? minLayerHeight(S.plate) : 0;
+      if (min && +v < min - 1e-9) { F.toast(`${v} mm is too fine for this plate on the board (not enough memory): set to ${min.toFixed(2)} mm, the finest it allows.`, true); v = String(min); }
     }
     if (String(fmtVal(S.values[key])) === v) delete S.overrides[key]; else S.overrides[key] = v;
     changed();
@@ -1934,6 +2057,19 @@ async function slice(i = S.plate) {
   if (!list.length) { F.toast(`Plate ${i + 1} is empty.`, true); return false; }
   checkBounds();
   if (list.some((o) => o.outside)) { F.toast(`Some models on plate ${i + 1} are off the plate. Move them onto it first.`, true); setPlate(i); location.hash = '#slicer/prepare'; return false; }
+  // Board memory: a layer height finer than this plate allows is raised before slicing (see plateMemory)
+  {
+    const min = minLayerHeight(i), h = +valueOf('layer_height') || 0.2;
+    if (min === null) {
+      F.toast(`Plate ${i + 1} needs more memory than the board has, even at the coarsest layer height. Paint supports only where needed, or move some models to another plate.`, true);
+      setPlate(i); location.hash = '#slicer/prepare'; return false;
+    }
+    if (h < min - 1e-9) {
+      if (String(fmtVal(S.values.layer_height)) === String(min)) delete S.overrides.layer_height; else S.overrides.layer_height = String(min);
+      savePrefs();
+      F.toast(`Layer height raised from ${h} to ${min.toFixed(2)} mm: finer would run the board out of memory on plate ${i + 1}.`);
+    }
+  }
   const supOn = /^(1|true)$/.test(String(valueOf('enable_support')));
   if (!supOn && list.some((o) => o.sup && o.sup.includes(1))) F.toast('Painted supports are left out: Supports is switched off (switch it on under Paint → Supports).', true);
   // Only the filaments this plate uses are sent, as tools 1..n. More than the printer can hold

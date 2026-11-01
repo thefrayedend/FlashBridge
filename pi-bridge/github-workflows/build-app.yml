@@ -1,0 +1,118 @@
+# Flash Bridge for Android - builds the phone app (APK) from pi-bridge/app.
+#
+# How to use: Actions -> "Build Android app" -> Run workflow. The APK appears under
+# Releases -> "Flash Bridge Android app" (tag latest-app); open that page on the phone,
+# download flash-bridge.apk and install it (allow "install unknown apps" for the browser once).
+# Each build counts up the version (0.1.<run>), so the app's "Check for updates" finds it.
+#
+# Only the app's own files are kept in git (lib/, android/app/src/main/, pubspec.yaml); the rest of
+# the Android project (Gradle files, styles) is made fresh by "flutter create" on every build.
+name: Build Android app
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GH_TOKEN: ${{ github.token }}
+    defaults:
+      run:
+        working-directory: pi-bridge/app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          # pinned to a release known to build flutter_inappwebview 6.1.x; raise it on purpose, not by accident
+          flutter-version: 3.29.3
+          cache: true
+
+      - name: Complete the Android project (keeps our own files)
+        run: |
+          flutter --version
+          flutter create --platforms=android --org io.github.thefrayedend --project-name flash_bridge .
+          rm -rf test   # the template's sample test is for the template's app
+          ls android/app
+
+      - name: Sign with the app's fixed key (so updates install over the old version)
+        run: |
+          # A secret ANDROID_KEYSTORE_BASE64 (+ ANDROID_KEYSTORE_PASSWORD) takes over when it is set;
+          # otherwise the sideload key in the repo is used.
+          if [ -n "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" ]; then
+            echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > android/app/release.jks
+            STORE=release.jks; PASS="${{ secrets.ANDROID_KEYSTORE_PASSWORD }}"
+          else
+            STORE=flashbridge-sideload.jks; PASS=flashbridge-sideload
+          fi
+          if [ -f android/app/build.gradle.kts ]; then
+            cat >> android/app/build.gradle.kts <<EOF
+
+          android {
+              signingConfigs {
+                  create("flashbridge") {
+                      storeFile = file("$STORE")
+                      storePassword = "$PASS"
+                      keyAlias = "flashbridge"
+                      keyPassword = "$PASS"
+                  }
+              }
+              buildTypes {
+                  getByName("release") {
+                      signingConfig = signingConfigs.getByName("flashbridge")
+                  }
+              }
+          }
+          EOF
+          else
+            cat >> android/app/build.gradle <<EOF
+
+          android {
+              signingConfigs {
+                  flashbridge {
+                      storeFile file("$STORE")
+                      storePassword "$PASS"
+                      keyAlias "flashbridge"
+                      keyPassword "$PASS"
+                  }
+              }
+              buildTypes {
+                  release {
+                      signingConfig signingConfigs.flashbridge
+                  }
+              }
+          }
+          EOF
+          fi
+          tail -25 android/app/build.gradle*
+
+      - name: Check the code
+        run: |
+          flutter pub get
+          flutter analyze --no-fatal-infos --no-fatal-warnings
+
+      - name: Build the APK
+        run: |
+          flutter build apk --release --build-name "0.1.${{ github.run_number }}" --build-number "${{ github.run_number }}"
+          mkdir -p "$GITHUB_WORKSPACE/app-out"
+          cp build/app/outputs/flutter-apk/app-release.apk "$GITHUB_WORKSPACE/app-out/flash-bridge.apk"
+          echo '{"version": "0.1.${{ github.run_number }}", "apk": "flash-bridge.apk"}' > "$GITHUB_WORKSPACE/app-out/flash-bridge-app.json"
+          ls -lh "$GITHUB_WORKSPACE/app-out"
+
+      - name: Publish it as the "Flash Bridge Android app" release
+        run: |
+          gh release delete latest-app --yes --cleanup-tag --repo "$GITHUB_REPOSITORY" || true
+          gh release create latest-app "$GITHUB_WORKSPACE"/app-out/* --repo "$GITHUB_REPOSITORY" \
+            --title "Flash Bridge Android app 0.1.${{ github.run_number }}" \
+            --notes "Open this page on your phone, tap flash-bridge.apk and install it. Updating: install the new one over the old (Settings → Check for updates in the app does this)."

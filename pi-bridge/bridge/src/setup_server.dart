@@ -407,6 +407,9 @@ class SetupServer {
 
   Future<Map<String, dynamic>> _status(HttpRequest req) async => {
         'version': piBridgeVersion,
+        // for the phone app: what this bridge can do (added fields only; nothing renamed)
+        'api': 1,
+        'capabilities': ['printers', 'camera', 'control', 'upload', 'ai', if (slicer != null) 'slicer', if (slicer != null) 'slicer-inbox'],
         'hostname': SystemControl.hostname(),
         'ips': await SystemControl.localIps(),
         'boardControls': sys.available,

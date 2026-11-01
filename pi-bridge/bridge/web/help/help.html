@@ -187,6 +187,18 @@ wifi_password=YourWiFiPassword</pre>
   </ul>
 </section>
 
+<section data-topic="phone" data-title="Phone app (Android)" data-group="Using it">
+  <p>The <b>Flash Bridge app</b> puts this page, the slicer and the model sites on your phone, and tells you when a print needs you.</p>
+  <ul>
+    <li><b>Install:</b> on the phone, open <a href="https://github.com/thefrayedend/ffbridge-pi/releases/tag/latest-app" target="_blank" rel="noopener">github.com/thefrayedend/ffbridge-pi/releases/tag/latest-app</a>, tap <b>flash-bridge.apk</b> and install it (the phone asks once to allow installing apps from your browser).</li>
+    <li>The app finds the board on the Wi-Fi by itself. If not, type its name (for example <b>creator5.local</b>) or address in the app's Settings.</li>
+    <li><b>Printer</b> and <b>Slicer</b> tabs show this page. <b>Models</b> is a browser for MakerWorld, Printables, Thingiverse and Thangs: tap Download on a model and it opens in the slicer here (a ZIP opens every model inside). G-code goes straight to the printer.</li>
+    <li>From any other app, <b>Open with</b> or <b>Share</b> a 3MF, STL, OBJ, ZIP or G-code file to Flash Bridge. Sharing a model page's link opens it in the Models tab.</li>
+    <li><b>Notifications</b> (app Settings): the running print or slice with a progress bar in the notification bar; alerts when a print finishes, is paused (also by the AI), fails or the board goes quiet, and when a slice is done.</li>
+    <li>MakerWorld: log in with your e-mail and password; Google sign-in does not work inside apps.</li>
+  </ul>
+</section>
+
 <section data-topic="notifications" data-title="Discord and Spoolman" data-group="Advanced">
   <figure><img src="help/img/general.jpg" alt="General settings" loading="lazy"><figcaption>Settings → General</figcaption></figure>
   <h3>Discord notifications</h3>
@@ -300,6 +312,7 @@ ssh_password=            at least 6 characters</pre>
     <li>Keys in Prepare: <b>M / R / S / F</b> tools, <b>arrow keys</b> nudge the selected model 1 mm (Shift: 10 mm), <b>Ctrl+D</b> duplicates, <b>X</b> mirrors left-right (painting included), <b>Del</b> deletes, <b>Ctrl+Z</b> undoes, <b>Page Up / Down</b> switch plates. The size fields (Width / Depth / Height mm) scale the model evenly.</li>
     <li>Very detailed models (more than 1.5 million triangles, e.g. scans and sculpts) are <b>simplified</b> when opened to about 1 million: the shape moves at most 0.05 mm and the painting stays exactly as it was — still far finer than the nozzle can print. Very big models are slow on phones; a PC works best for painting.</li>
     <li><b>Infill filament</b> (Quality card): prints the inside of every model with one filament, for example cheap white, also on multi-colour prints. The outside keeps its colours as a skin about 3 mm thick; top and bottom surfaces and walls are never printed with it. The infill filament counts as one of the printer's colours on each plate.</li>
+    <li><b>Finest layer height</b>: under Layer height the page shows the finest height this plate can be sliced at on the board, and how much of the board's memory the current setting needs. It is worked out from the models' size and shape, the supports and the infill, before slicing (measured on real slices, within a few percent). Heights that would run the board out of memory are greyed out, a typed one is raised, and a slice never starts below it. Supports at fine layers cost the most: painting supports only where they are needed lowers the limit a lot.</li>
     <li><b>Layer height</b> is a dropdown of the usual heights for the selected nozzle (0.08 to 0.28 mm for a 0.4 nozzle); pick <b>Other…</b> to type any height. Number fields step in their own precision (a 0.8 mm value steps by 0.1).</li>
     <li><b>Lighter G-code</b> (Quality card): very detailed models (scans, sculpts) make millions of tiny moves, and the board keeps every one in memory while it writes the file. Lighter G-code keeps the paths to 0.05 mm (an eighth of the nozzle; not visible on the print) and writes straight moves instead of arcs, which cuts that memory by about a third. <b>Auto</b> switches it on only for plates with 200,000 triangles or more and says so under the slice result; <b>Always</b> and <b>Never</b> do what they say. Your own values for Resolution and Arc fitting in All settings always win.</li>
     <li>If the models leave no room for the prime tower (the purge block for colour changes), a printer with one nozzle per colour such as the Creator 5 prints without it.</li>

@@ -1,8 +1,9 @@
 # Notes for a future phone app (read before changing the bridge)
 
-A Flash Bridge phone app (Android first) is planned but **not being built yet**. The rule for now:
-**don't go out of the way for the app, but whenever a file is being edited anyway, make that part
-app-friendly at the same time** (two birds, one stone).
+The Flash Bridge phone app (Android) **exists now**: `app/` (see `app/README.md`), built by the
+"Build Android app" workflow. Version 1 does the "Bambu Handy" list below except the widget / lock-screen
+camera. The rule stays: **whenever a bridge file is being edited anyway, make that part app-friendly at the
+same time**, and never rename or remove JSON fields the app reads (`app/README.md` lists them).
 
 ## What the app is expected to do
 

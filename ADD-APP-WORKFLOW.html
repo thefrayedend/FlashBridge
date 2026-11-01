@@ -1,0 +1,127 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Add the app build to GitHub</title>
+<style>body{font:18px system-ui,sans-serif;max-width:720px;margin:40px auto;padding:0 16px;line-height:1.5}a.b{display:inline-block;background:#1a73e8;color:#fff;padding:14px 22px;border-radius:10px;text-decoration:none;font-weight:600}pre{background:#f2f3f5;padding:12px;overflow:auto;font-size:12px}</style></head><body>
+<h1>Add the Android app build to GitHub (one time)</h1>
+<ol><li>Click the blue button. GitHub opens a new file called <b>.github/workflows/build-app.yml</b>, already filled in.</li>
+<li>Scroll down (or top right) and click <b>Commit changes…</b>, then <b>Commit changes</b> again.</li>
+<li>Come back to the chat and say "workflow added".</li></ol>
+<p><a class="b" href="https://github.com/thefrayedend/ffbridge-pi/new/main?filename=.github/workflows/build-app.yml&amp;value=%23%20Flash%20Bridge%20for%20Android%20-%20builds%20the%20phone%20app%20%28APK%29%20from%20pi-bridge/app.%0A%23%0A%23%20How%20to%20use%3A%20Actions%20-%3E%20%22Build%20Android%20app%22%20-%3E%20Run%20workflow.%20The%20APK%20appears%20under%0A%23%20Releases%20-%3E%20%22Flash%20Bridge%20Android%20app%22%20%28tag%20latest-app%29%3B%20open%20that%20page%20on%20the%20phone%2C%0A%23%20download%20flash-bridge.apk%20and%20install%20it%20%28allow%20%22install%20unknown%20apps%22%20for%20the%20browser%20once%29.%0A%23%20Each%20build%20counts%20up%20the%20version%20%280.1.%3Crun%3E%29%2C%20so%20the%20app%27s%20%22Check%20for%20updates%22%20finds%20it.%0A%23%0A%23%20Only%20the%20app%27s%20own%20files%20are%20kept%20in%20git%20%28lib/%2C%20android/app/src/main/%2C%20pubspec.yaml%29%3B%20the%20rest%20of%0A%23%20the%20Android%20project%20%28Gradle%20files%2C%20styles%29%20is%20made%20fresh%20by%20%22flutter%20create%22%20on%20every%20build.%0Aname%3A%20Build%20Android%20app%0A%0Aon%3A%0A%20%20workflow_dispatch%3A%0A%0Apermissions%3A%0A%20%20contents%3A%20write%0A%0Ajobs%3A%0A%20%20build%3A%0A%20%20%20%20runs-on%3A%20ubuntu-latest%0A%20%20%20%20timeout-minutes%3A%2045%0A%20%20%20%20env%3A%0A%20%20%20%20%20%20GH_TOKEN%3A%20%24%7B%7B%20github.token%20%7D%7D%0A%20%20%20%20defaults%3A%0A%20%20%20%20%20%20run%3A%0A%20%20%20%20%20%20%20%20working-directory%3A%20pi-bridge/app%0A%20%20%20%20steps%3A%0A%20%20%20%20%20%20-%20uses%3A%20actions/checkout%40v4%0A%0A%20%20%20%20%20%20-%20uses%3A%20actions/setup-java%40v4%0A%20%20%20%20%20%20%20%20with%3A%0A%20%20%20%20%20%20%20%20%20%20distribution%3A%20temurin%0A%20%20%20%20%20%20%20%20%20%20java-version%3A%20%2717%27%0A%0A%20%20%20%20%20%20-%20uses%3A%20subosito/flutter-action%40v2%0A%20%20%20%20%20%20%20%20with%3A%0A%20%20%20%20%20%20%20%20%20%20channel%3A%20stable%0A%20%20%20%20%20%20%20%20%20%20%23%20pinned%20to%20a%20release%20known%20to%20build%20flutter_inappwebview%206.1.x%3B%20raise%20it%20on%20purpose%2C%20not%20by%20accident%0A%20%20%20%20%20%20%20%20%20%20flutter-version%3A%203.29.3%0A%20%20%20%20%20%20%20%20%20%20cache%3A%20true%0A%0A%20%20%20%20%20%20-%20name%3A%20Complete%20the%20Android%20project%20%28keeps%20our%20own%20files%29%0A%20%20%20%20%20%20%20%20run%3A%20%7C%0A%20%20%20%20%20%20%20%20%20%20flutter%20--version%0A%20%20%20%20%20%20%20%20%20%20flutter%20create%20--platforms%3Dandroid%20--org%20io.github.thefrayedend%20--project-name%20flash_bridge%20.%0A%20%20%20%20%20%20%20%20%20%20rm%20-rf%20test%20%20%20%23%20the%20template%27s%20sample%20test%20is%20for%20the%20template%27s%20app%0A%20%20%20%20%20%20%20%20%20%20ls%20android/app%0A%0A%20%20%20%20%20%20-%20name%3A%20Sign%20with%20the%20app%27s%20fixed%20key%20%28so%20updates%20install%20over%20the%20old%20version%29%0A%20%20%20%20%20%20%20%20run%3A%20%7C%0A%20%20%20%20%20%20%20%20%20%20%23%20A%20secret%20ANDROID_KEYSTORE_BASE64%20%28%2B%20ANDROID_KEYSTORE_PASSWORD%29%20takes%20over%20when%20it%20is%20set%3B%0A%20%20%20%20%20%20%20%20%20%20%23%20otherwise%20the%20sideload%20key%20in%20the%20repo%20is%20used.%0A%20%20%20%20%20%20%20%20%20%20if%20%5B%20-n%20%22%24%7B%7B%20secrets.ANDROID_KEYSTORE_BASE64%20%7D%7D%22%20%5D%3B%20then%0A%20%20%20%20%20%20%20%20%20%20%20%20echo%20%22%24%7B%7B%20secrets.ANDROID_KEYSTORE_BASE64%20%7D%7D%22%20%7C%20base64%20-d%20%3E%20android/app/release.jks%0A%20%20%20%20%20%20%20%20%20%20%20%20STORE%3Drelease.jks%3B%20PASS%3D%22%24%7B%7B%20secrets.ANDROID_KEYSTORE_PASSWORD%20%7D%7D%22%0A%20%20%20%20%20%20%20%20%20%20else%0A%20%20%20%20%20%20%20%20%20%20%20%20STORE%3Dflashbridge-sideload.jks%3B%20PASS%3Dflashbridge-sideload%0A%20%20%20%20%20%20%20%20%20%20fi%0A%20%20%20%20%20%20%20%20%20%20if%20%5B%20-f%20android/app/build.gradle.kts%20%5D%3B%20then%0A%20%20%20%20%20%20%20%20%20%20%20%20cat%20%3E%3E%20android/app/build.gradle.kts%20%3C%3CEOF%0A%0A%20%20%20%20%20%20%20%20%20%20android%20%7B%0A%20%20%20%20%20%20%20%20%20%20%20%20%20%20signingConfigs%20%7B%0A%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20create%28%22flashbridge%22%29%20%7B%0A%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20storeFile%20%3D%20file%28%22%24STORE%22%29%0A%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20storePassword%20%3D%20%22%24PASS%22%0A%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20keyAlias%20%3D%20%22flashbridge%22%0A%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20keyPassword%20%3D%20%22%24PASS%22%0A%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%7D%0A%20%20%20%20%20%20%20%20%20%20%20%20%20%20%7D%0A%20%20%20%20%20%20%20%20%20%20%20%20%20%20buildTypes%20%7B%0A%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20getByName%28%22release%22%29%20%7B%0A%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20signingConfig%20%3D%20signingConfigs.getByName%28%22flashbridge%22%29%0A%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%7D%0A%20%20%20%20%20%20%20%20%20%20%20%20%20%20%7D%0A%20%20%20%20%20%20%20%20%20%20%7D%0A%20%20%20%20%20%20%20%20%20%20EOF%0A%20%20%20%20%20%20%20%20%20%20else%0A%20%20%20%20%20%20%20%20%20%20%20%20cat%20%3E%3E%20android/app/build.gradle%20%3C%3CEOF%0A%0A%20%20%20%20%20%20%20%20%20%20android%20%7B%0A%20%20%20%20%20%20%20%20%20%20%20%20%20%20signingConfigs%20%7B%0A%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20flashbridge%20%7B%0A%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20storeFile%20file%28%22%24STORE%22%29%0A%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20storePassword%20%22%24PASS%22%0A%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20keyAlias%20%22flashbridge%22%0A%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20keyPassword%20%22%24PASS%22%0A%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%7D%0A%20%20%20%20%20%20%20%20%20%20%20%20%20%20%7D%0A%20%20%20%20%20%20%20%20%20%20%20%20%20%20buildTypes%20%7B%0A%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20release%20%7B%0A%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20signingConfig%20signingConfigs.flashbridge%0A%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%7D%0A%20%20%20%20%20%20%20%20%20%20%20%20%20%20%7D%0A%20%20%20%20%20%20%20%20%20%20%7D%0A%20%20%20%20%20%20%20%20%20%20EOF%0A%20%20%20%20%20%20%20%20%20%20fi%0A%20%20%20%20%20%20%20%20%20%20tail%20-25%20android/app/build.gradle%2A%0A%0A%20%20%20%20%20%20-%20name%3A%20Check%20the%20code%0A%20%20%20%20%20%20%20%20run%3A%20%7C%0A%20%20%20%20%20%20%20%20%20%20flutter%20pub%20get%0A%20%20%20%20%20%20%20%20%20%20flutter%20analyze%20--no-fatal-infos%20--no-fatal-warnings%0A%0A%20%20%20%20%20%20-%20name%3A%20Build%20the%20APK%0A%20%20%20%20%20%20%20%20run%3A%20%7C%0A%20%20%20%20%20%20%20%20%20%20flutter%20build%20apk%20--release%20--build-name%20%220.1.%24%7B%7B%20github.run_number%20%7D%7D%22%20--build-number%20%22%24%7B%7B%20github.run_number%20%7D%7D%22%0A%20%20%20%20%20%20%20%20%20%20mkdir%20-p%20%22%24GITHUB_WORKSPACE/app-out%22%0A%20%20%20%20%20%20%20%20%20%20cp%20build/app/outputs/flutter-apk/app-release.apk%20%22%24GITHUB_WORKSPACE/app-out/flash-bridge.apk%22%0A%20%20%20%20%20%20%20%20%20%20echo%20%27%7B%22version%22%3A%20%220.1.%24%7B%7B%20github.run_number%20%7D%7D%22%2C%20%22apk%22%3A%20%22flash-bridge.apk%22%7D%27%20%3E%20%22%24GITHUB_WORKSPACE/app-out/flash-bridge-app.json%22%0A%20%20%20%20%20%20%20%20%20%20ls%20-lh%20%22%24GITHUB_WORKSPACE/app-out%22%0A%0A%20%20%20%20%20%20-%20name%3A%20Publish%20it%20as%20the%20%22Flash%20Bridge%20Android%20app%22%20release%0A%20%20%20%20%20%20%20%20run%3A%20%7C%0A%20%20%20%20%20%20%20%20%20%20gh%20release%20delete%20latest-app%20--yes%20--cleanup-tag%20--repo%20%22%24GITHUB_REPOSITORY%22%20%7C%7C%20true%0A%20%20%20%20%20%20%20%20%20%20gh%20release%20create%20latest-app%20%22%24GITHUB_WORKSPACE%22/app-out/%2A%20--repo%20%22%24GITHUB_REPOSITORY%22%20%5C%0A%20%20%20%20%20%20%20%20%20%20%20%20--title%20%22Flash%20Bridge%20Android%20app%200.1.%24%7B%7B%20github.run_number%20%7D%7D%22%20%5C%0A%20%20%20%20%20%20%20%20%20%20%20%20--notes%20%22Open%20this%20page%20on%20your%20phone%2C%20tap%20flash-bridge.apk%20and%20install%20it.%20Updating%3A%20install%20the%20new%20one%20over%20the%20old%20%28Settings%20%E2%86%92%20Check%20for%20updates%20in%20the%20app%20does%20this%29.%22%0A">Open GitHub with the file filled in</a></p>
+<p>If the file opens empty: copy everything in the box below, paste it into the empty file on GitHub, and commit.</p>
+<pre># Flash Bridge for Android - builds the phone app (APK) from pi-bridge/app.
+#
+# How to use: Actions -&gt; &quot;Build Android app&quot; -&gt; Run workflow. The APK appears under
+# Releases -&gt; &quot;Flash Bridge Android app&quot; (tag latest-app); open that page on the phone,
+# download flash-bridge.apk and install it (allow &quot;install unknown apps&quot; for the browser once).
+# Each build counts up the version (0.1.&lt;run&gt;), so the app&#x27;s &quot;Check for updates&quot; finds it.
+#
+# Only the app&#x27;s own files are kept in git (lib/, android/app/src/main/, pubspec.yaml); the rest of
+# the Android project (Gradle files, styles) is made fresh by &quot;flutter create&quot; on every build.
+name: Build Android app
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GH_TOKEN: ${{ github.token }}
+    defaults:
+      run:
+        working-directory: pi-bridge/app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: &#x27;17&#x27;
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          # pinned to a release known to build flutter_inappwebview 6.1.x; raise it on purpose, not by accident
+          flutter-version: 3.29.3
+          cache: true
+
+      - name: Complete the Android project (keeps our own files)
+        run: |
+          flutter --version
+          flutter create --platforms=android --org io.github.thefrayedend --project-name flash_bridge .
+          rm -rf test   # the template&#x27;s sample test is for the template&#x27;s app
+          ls android/app
+
+      - name: Sign with the app&#x27;s fixed key (so updates install over the old version)
+        run: |
+          # A secret ANDROID_KEYSTORE_BASE64 (+ ANDROID_KEYSTORE_PASSWORD) takes over when it is set;
+          # otherwise the sideload key in the repo is used.
+          if [ -n &quot;${{ secrets.ANDROID_KEYSTORE_BASE64 }}&quot; ]; then
+            echo &quot;${{ secrets.ANDROID_KEYSTORE_BASE64 }}&quot; | base64 -d &gt; android/app/release.jks
+            STORE=release.jks; PASS=&quot;${{ secrets.ANDROID_KEYSTORE_PASSWORD }}&quot;
+          else
+            STORE=flashbridge-sideload.jks; PASS=flashbridge-sideload
+          fi
+          if [ -f android/app/build.gradle.kts ]; then
+            cat &gt;&gt; android/app/build.gradle.kts &lt;&lt;EOF
+
+          android {
+              signingConfigs {
+                  create(&quot;flashbridge&quot;) {
+                      storeFile = file(&quot;$STORE&quot;)
+                      storePassword = &quot;$PASS&quot;
+                      keyAlias = &quot;flashbridge&quot;
+                      keyPassword = &quot;$PASS&quot;
+                  }
+              }
+              buildTypes {
+                  getByName(&quot;release&quot;) {
+                      signingConfig = signingConfigs.getByName(&quot;flashbridge&quot;)
+                  }
+              }
+          }
+          EOF
+          else
+            cat &gt;&gt; android/app/build.gradle &lt;&lt;EOF
+
+          android {
+              signingConfigs {
+                  flashbridge {
+                      storeFile file(&quot;$STORE&quot;)
+                      storePassword &quot;$PASS&quot;
+                      keyAlias &quot;flashbridge&quot;
+                      keyPassword &quot;$PASS&quot;
+                  }
+              }
+              buildTypes {
+                  release {
+                      signingConfig signingConfigs.flashbridge
+                  }
+              }
+          }
+          EOF
+          fi
+          tail -25 android/app/build.gradle*
+
+      - name: Check the code
+        run: |
+          flutter pub get
+          flutter analyze --no-fatal-infos --no-fatal-warnings
+
+      - name: Build the APK
+        run: |
+          flutter build apk --release --build-name &quot;0.1.${{ github.run_number }}&quot; --build-number &quot;${{ github.run_number }}&quot;
+          mkdir -p &quot;$GITHUB_WORKSPACE/app-out&quot;
+          cp build/app/outputs/flutter-apk/app-release.apk &quot;$GITHUB_WORKSPACE/app-out/flash-bridge.apk&quot;
+          echo &#x27;{&quot;version&quot;: &quot;0.1.${{ github.run_number }}&quot;, &quot;apk&quot;: &quot;flash-bridge.apk&quot;}&#x27; &gt; &quot;$GITHUB_WORKSPACE/app-out/flash-bridge-app.json&quot;
+          ls -lh &quot;$GITHUB_WORKSPACE/app-out&quot;
+
+      - name: Publish it as the &quot;Flash Bridge Android app&quot; release
+        run: |
+          gh release delete latest-app --yes --cleanup-tag --repo &quot;$GITHUB_REPOSITORY&quot; || true
+          gh release create latest-app &quot;$GITHUB_WORKSPACE&quot;/app-out/* --repo &quot;$GITHUB_REPOSITORY&quot; \
+            --title &quot;Flash Bridge Android app 0.1.${{ github.run_number }}&quot; \
+            --notes &quot;Open this page on your phone, tap flash-bridge.apk and install it. Updating: install the new one over the old (Settings → Check for updates in the app does this).&quot;
+</pre></body></html>

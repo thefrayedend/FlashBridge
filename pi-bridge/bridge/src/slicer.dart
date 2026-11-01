@@ -487,6 +487,16 @@ class Slicer {
     return {'ok': true, 'message': 'Slicer engine removed.'};
   }
 
+  /// The board's RAM (MB), for the slicer page's memory estimate (layer height guard).
+  static final int? _memTotalMB = () {
+    try {
+      final m = RegExp(r'^MemTotal:\s+(\d+) kB', multiLine: true).firstMatch(File('/proc/meminfo').readAsStringSync());
+      return m == null ? null : int.parse(m.group(1)!) ~/ 1024;
+    } catch (_) {
+      return null;
+    }
+  }();
+
   Future<Map<String, dynamic>> statusJson() async => {
         'enabled': pi.slicerEnabled,
         'installed': installed,
@@ -494,6 +504,7 @@ class Slicer {
         'supported': await supported(),
         'install': installState,
         'source': slicerSourceUrl,
+        if (_memTotalMB != null) 'memTotalMB': _memTotalMB,
         'jobs': {for (final e in jobs.entries) '${e.key}': e.value.toJson()},
       };
 
@@ -521,6 +532,65 @@ class Slicer {
       return await _startSlice(req, boundary);
     } finally {
       _starting = false;
+    }
+  }
+
+  // ------------------------------------------------------------------ inbox (models from other devices)
+  Directory get _inbox => Directory('$dir/inbox');
+  static const _modelExt = ['.3mf', '.stl', '.obj', '.zip'];
+
+  /// Saves an uploaded model; answers its id. Files older than a day are removed, at most 8 kept.
+  Future<Map<String, dynamic>> _inboxPut(HttpRequest req) async {
+    final boundary = req.headers.contentType?.parameters['boundary'];
+    if (boundary == null) return {'ok': false, 'message': 'Expected a file upload.'};
+    _inbox.createSync(recursive: true);
+    final tmp = File('${_inbox.path}/upload-${DateTime.now().microsecondsSinceEpoch}.tmp');
+    final mp = await parseMultipart(req, boundary, tmp);
+    if (mp.file == null || mp.fileSize == 0) {
+      if (tmp.existsSync()) tmp.deleteSync();
+      return {'ok': false, 'message': 'No file received.'};
+    }
+    final name = safeInboxName(mp.fileName ?? 'model.3mf');
+    if (!_modelExt.any((e) => name.toLowerCase().endsWith(e))) {
+      tmp.deleteSync();
+      return {'ok': false, 'message': 'Only 3MF, STL, OBJ (or a ZIP of them) can be opened in the slicer.'};
+    }
+    // id: 16 hex digits, also the file name's prefix: <id>-<name>
+    final id = DateTime.now().microsecondsSinceEpoch.toRadixString(16).padLeft(16, '0');
+    tmp.renameSync('${_inbox.path}/$id-$name');
+    _inboxTidy();
+    host.log.info('Slicer inbox: $name (${(mp.fileSize / 1e6).toStringAsFixed(1)} MB)');
+    return {'ok': true, 'id': id, 'name': name, 'open': '#slicer/prepare/inbox=$id'};
+  }
+
+  File? _inboxFile(String id) {
+    if (!RegExp(r'^[0-9a-f]{16}$').hasMatch(id) || !_inbox.existsSync()) return null;
+    for (final f in _inbox.listSync().whereType<File>()) {
+      if (f.uri.pathSegments.last.startsWith('$id-')) return f;
+    }
+    return null;
+  }
+
+  List<Map<String, dynamic>> _inboxList() {
+    if (!_inbox.existsSync()) return [];
+    final files = _inbox.listSync().whereType<File>().where((f) => RegExp(r'^[0-9a-f]{16}-').hasMatch(f.uri.pathSegments.last)).toList()
+      ..sort((a, b) => b.path.compareTo(a.path));
+    return [
+      for (final f in files)
+        {'id': f.uri.pathSegments.last.substring(0, 16), 'name': f.uri.pathSegments.last.substring(17), 'size': f.lengthSync()}
+    ];
+  }
+
+  void _inboxTidy() {
+    final files = _inbox.listSync().whereType<File>().toList()..sort((a, b) => b.path.compareTo(a.path));
+    final old = DateTime.now().subtract(const Duration(days: 1));
+    for (var i = 0; i < files.length; i++) {
+      final f = files[i];
+      if (i >= 8 || f.lastModifiedSync().isBefore(old)) {
+        try {
+          f.deleteSync();
+        } catch (_) {}
+      }
     }
   }
 
@@ -780,6 +850,12 @@ class Slicer {
         case 'POST send':
           final b = await body();
           await json(req, await send('${b['printer'] ?? ''}', plateOf(b['plate'])));
+        case 'POST inbox':
+          // A model sent from another device (the phone app's Share / Open with / in-app browser):
+          // kept for the slicer page to open (#slicer/prepare/inbox=<id>).
+          await json(req, await _inboxPut(req));
+        case 'GET inbox':
+          await json(req, {'ok': true, 'files': _inboxList()});
         case 'GET gcode':
           final job = jobs[plateOf(q['plate'])];
           final g = job?.gcode;
@@ -797,7 +873,19 @@ class Slicer {
           await req.response.addStream(File(file).openRead());
           await req.response.close();
         default:
+          if (seg.length == 3 && seg[1] == 'inbox' && m == 'GET') {
+            final f = _inboxFile(seg[2]);
+            if (f == null) return await json(req, {'ok': false, 'message': 'That file is gone (files sent to the slicer are kept for a day).'}, status: 404).then((_) => true);
+            req.response.headers
+              ..contentType = ContentType.binary
+              ..set('Cache-Control', 'no-store')
+              ..set('X-File-Name', Uri.encodeComponent(f.uri.pathSegments.last.substring(17)));
+            await req.response.addStream(f.openRead());
+            await req.response.close();
+            return true;
+          }
           await json(req, {'ok': false, 'message': 'Not found'}, status: 404);
+          return true;
       }
     } on SlicerException catch (e) {
       await json(req, {'ok': false, 'message': e.message});
@@ -1199,4 +1287,15 @@ void zipAddStored(File f, String name, Uint8List data) {
   } finally {
     raf.closeSync();
   }
+}
+
+/// A file name from another device, made safe for the inbox folder: no folders, no odd characters.
+String safeInboxName(String raw) {
+  var n = raw.replaceAll('\\', '/').split('/').last.trim();
+  n = n.replaceAll(RegExp(r'[^\p{L}\p{N} ._()+-]', unicode: true), '_');
+  if (n.length > 120) {
+    final dot = n.lastIndexOf('.');
+    n = dot > 0 ? n.substring(0, 110) + n.substring(dot) : n.substring(0, 120);
+  }
+  return n.isEmpty || n.startsWith('.') ? 'model$n' : n;
 }

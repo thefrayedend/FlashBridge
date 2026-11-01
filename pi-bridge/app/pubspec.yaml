@@ -1,0 +1,22 @@
+name: flash_bridge
+description: "Flash Bridge for Android: your FlashForge printer, the board's slicer and model sites in one app."
+publish_to: 'none'
+# The build workflow sets the version code from the run number.
+version: 0.1.0+1
+
+environment:
+  sdk: ">=3.5.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  # web views with file pickers, download catching and cookie access (Apache-2.0)
+  flutter_inappwebview: ^6.1.5
+  # finding the board on the Wi-Fi (BSD, by the Flutter team)
+  multicast_dns: ^0.3.2
+
+dev_dependencies:
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true
