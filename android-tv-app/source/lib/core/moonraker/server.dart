@@ -348,8 +348,7 @@ class MoonrakerServer {
     if (b.online) {
       try {
         if (printReq) {
-          await b.uploadToPrinter(dest, name, printNow: false);
-          await b.startPrint(rel);
+          await b.startPrint(rel); // sends the file with "print now" (or holds it for the slot check)
           started = true;
         } else {
           await b.uploadToPrinter(dest, name, printNow: false);

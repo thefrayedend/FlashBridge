@@ -249,10 +249,7 @@ class FlashForgeClient {
   /// Starts a print of a file already stored on the printer.
   Future<bool> printLocal(String fileName, {bool leveling = false, List<MaterialMapping>? mappings}) => _exclusive(() async {
         Map<String, dynamic> body;
-        if (isCreator5) {
-          body = {..._auth, 'fileName': fileName, 'levelingBeforePrint': leveling, 'flowCalibration': false, 'timeLapseVideo': false};
-          if (mappings != null && mappings.isNotEmpty) body['materialMappings'] = [for (final m in mappings) m.toJson()];
-        } else if (isAD5X) {
+        if (isCreator5 || isAD5X) {
           final use = mappings != null && mappings.isNotEmpty;
           body = {
             ..._auth,
@@ -286,7 +283,6 @@ class FlashForgeClient {
   Future<void> upload(File file, String fileName,
       {bool printNow = false,
       bool leveling = false,
-      int toolCount = 0,
       List<MaterialMapping>? mappings,
       void Function(int sent, int total)? onProgress}) async {
     final size = await file.length();
@@ -295,41 +291,28 @@ class FlashForgeClient {
     final pre = utf8.encode('--$boundary\r\nContent-Disposition: form-data; name="gcodeFile"; filename="$safeName"\r\n'
         'Content-Type: application/octet-stream\r\n\r\n');
     final post = utf8.encode('\r\n--$boundary--\r\n');
+    // The same headers, in the same order, as OrcaSlicer's Flashforge sender (Flashforge::upload_local_api).
+    final use = printNow && mappings != null && mappings.isNotEmpty;
+    final mapJson = jsonEncode(use ? [for (final m in mappings) m.toOrcaJson()] : []);
     final headers = <String, String>{
       'Host': '$ip:$httpPort',
+      'Accept': '*/*',
       'serialNumber': serial,
       'checkCode': checkCode,
       'fileSize': '$size',
       'printNow': '$printNow',
       'levelingBeforePrint': '$leveling',
+      'flowCalibration': 'false',
+      'firstLayerInspection': 'false',
+      'timeLapseVideo': 'false',
+      'useMatlStation': '$use',
+      'gcodeToolCnt': use ? '${mappings.length}' : '0',
+      'materialMappings': base64.encode(utf8.encode(mapJson)),
       'Content-Type': 'multipart/form-data; boundary=$boundary',
       'Content-Length': '${pre.length + size + post.length}',
       'Expect': '100-continue',
-      'Accept': '*/*',
       'Connection': 'close',
     };
-    final useMappings = printNow && mappings != null && mappings.isNotEmpty;
-    final mapB64 = base64.encode(utf8.encode(jsonEncode(useMappings ? [for (final m in mappings) m.toJson()] : [])));
-    if (isCreator5) {
-      headers.addAll({
-        'flowCalibration': 'false',
-        'timeLapseVideo': 'false',
-        'useMatlStation': '${toolCount > 1}',
-        'gcodeToolCnt': '$toolCount',
-      });
-      if (useMappings) headers['materialMappings'] = mapB64;
-    } else if (isAD5X) {
-      headers.addAll({
-        'flowCalibration': 'false',
-        'firstLayerInspection': 'false',
-        'timeLapseVideo': 'false',
-        'useMatlStation': '$useMappings',
-        'gcodeToolCnt': useMappings ? '${mappings.length}' : '0',
-        'materialMappings': mapB64,
-      });
-    } else {
-      headers.addAll({'flowCalibration': 'false', 'useMatlStation': 'false', 'gcodeToolCnt': '0', 'materialMappings': 'W10='});
-    }
 
     final sock = await Socket.connect(ip, httpPort, timeout: const Duration(seconds: 8));
     final resp = BytesBuilder();

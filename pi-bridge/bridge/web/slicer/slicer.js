@@ -2135,7 +2135,7 @@ async function slice(i = S.plate) {
   }
   if (tower && tower.free && tower.wall && overrides.wipe_tower_wall_type === undefined) { overrides.wipe_tower_wall_type = tower.wall; towerWall = tower.wall; }
   if (tower) tower = { x: tower.x, y: tower.y };
-  const opts = { printer: S.printerId, machine: S.info.machine, process: S.process, filaments: toolFils.map((f) => S.filaments[f - 1]), overrides, name: plateName(i), thumb: thumbnail(list), tower };
+  const opts = { printer: S.printerId, machine: S.info.machine, process: S.process, filaments: toolFils.map((f) => S.filaments[f - 1]), overrides, name: plateName(i), thumb: thumbnail(list, 512, 512), thumbSmall: thumbnail(list, 128, 128), thumbGcode: thumbnail(list, 140, 110), tower };
   const fd = new FormData();
   fd.append('options', JSON.stringify(opts));
   fd.append('model', blob, 'plate.3mf');
@@ -2393,15 +2393,15 @@ function setLayer(n) {
 
 // ================================================================== thumbnail for the file list / printer screen
 let thumbRenderer = null;
-function thumbnail(list) {
+// Sizes as OrcaSlicer makes them: plate picture 512x512, small 128x128, G-code thumbnail 140x110.
+function thumbnail(list, w = 512, h = 512) {
   try {
-    const size = 300;
     thumbRenderer ??= new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
-    thumbRenderer.setSize(size, size, false);
+    thumbRenderer.setSize(w, h, false);
     const box = new THREE.Box3();
     list.forEach((o) => box.union(worldBox(o)));
     const c = box.getCenter(new THREE.Vector3()), r = box.getSize(new THREE.Vector3()).length() / 2;
-    const cam = new THREE.PerspectiveCamera(30, 1, 1, 5000);
+    const cam = new THREE.PerspectiveCamera(30, w / h, 1, 5000);
     cam.up.set(0, 0, 1);
     cam.position.set(c.x + r * 1.6, c.y - r * 2.4, c.z + r * 2.0);
     cam.lookAt(c);

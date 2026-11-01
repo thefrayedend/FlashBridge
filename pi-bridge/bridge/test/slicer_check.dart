@@ -76,16 +76,27 @@ Future<void> main() async {
   check('meters', (st['meters'] as List)[1] == 2.5, st);
   check('layers / changes', st['layers'] == 42 && st['changes'] == 12, st);
 
-  // --- adding the plate picture to a sliced project
+  // --- packing the sliced project like OrcaSlicer's send (G-code with thumbnail, md5, pictures)
   final z = File('${dir.path}/p.gcode.3mf');
-  final py = await Process.run('python3', ['-c', 'import zipfile,sys;z=zipfile.ZipFile(sys.argv[1],"w",zipfile.ZIP_DEFLATED);z.writestr("Metadata/plate_1.gcode","G1\\n"*500);z.writestr("3D/3dmodel.model","<model/>");z.close()', z.path]);
+  final py = await Process.run('python3', ['-c', 'import zipfile,sys;z=zipfile.ZipFile(sys.argv[1],"w",zipfile.ZIP_DEFLATED);z.writestr("[Content_Types].xml","<Types/>");z.writestr("Metadata/plate_1.gcode","G1\\n"*500);z.writestr("Metadata/plate_1.gcode.md5","OLD");z.writestr("Metadata/slice_info.config","<config/>");z.writestr("_rels/.rels","<Relationships/>");z.close()', z.path]);
   if (py.exitCode == 0) {
-    zipAddStored(z, 'Metadata/plate_1.png', png);
-    final zr = ZipReader.tryFile(z.path);
-    check('zip still readable, picture added', zr != null && zr.find((n) => n == 'Metadata/plate_1.png') != null && zr.read(zr.find((n) => n == 'Metadata/plate_1.gcode')!).length == 1500);
-    final t2 = await Process.run('python3', ['-c', 'import zipfile,sys;z=zipfile.ZipFile(sys.argv[1]);assert z.testzip() is None;assert z.read("Metadata/plate_1.png")[:4]==b"\\x89PNG"', z.path]);
-    check('zip passes a full check (CRC)', t2.exitCode == 0, t2.stderr);
-    final md3 = await extract3mfMetadata(z);
+    final packed = File('${dir.path}/packed.gcode.3mf');
+    await packPrinterProject(z, out, packed, png: png, small: png);
+    const verify = 'import zipfile,sys,hashlib\n'
+        'z=zipfile.ZipFile(sys.argv[1]); assert z.testzip() is None\n'
+        'g=z.read("Metadata/plate_1.gcode"); assert g==open(sys.argv[2],"rb").read(), "gcode differs"\n'
+        'assert z.read("Metadata/plate_1.gcode.md5").decode()==hashlib.md5(g).hexdigest().upper(), "md5"\n'
+        'assert z.read("Metadata/plate_1.png")[:4]==b"\\x89PNG" and z.read("Metadata/plate_1_small.png")[:4]==b"\\x89PNG"\n'
+        'assert z.read("Metadata/slice_info.config")==b"<config/>" and z.read("[Content_Types].xml")==b"<Types/>"\n'
+        'n=z.namelist(); assert n.index("Metadata/plate_1.gcode")<n.index("Metadata/plate_1.gcode.md5")<n.index("Metadata/slice_info.config"), n\n'
+        'assert len(n)==7, n\n';
+    final t2 = await Process.run('python3', ['-c', verify, packed.path, out.path]);
+    check('packed project: G-code with thumbnail, md5, pictures, other entries kept, CRCs good', t2.exitCode == 0, t2.stderr);
+    final ut = await Process.run('unzip', ['-tq', packed.path]);
+    check('unzip -t accepts it', ut.exitCode == 0, ut.stdout);
+    final zr = ZipReader.tryFile(packed.path);
+    check('bridge reads it', zr != null && zr.find((n) => n == 'Metadata/plate_1.png') != null);
+    final md3 = await extract3mfMetadata(packed);
     check('bridge finds the plate picture', md3.thumbs.isNotEmpty);
   } else {
     stdout.writeln('skip zip checks (no python3)');

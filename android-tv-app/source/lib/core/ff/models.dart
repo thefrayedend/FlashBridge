@@ -163,6 +163,15 @@ class MaterialMapping {
   final String toolMaterialColor;
   final String slotMaterialColor;
   MaterialMapping(this.toolId, this.slotId, this.materialName, this.toolMaterialColor, this.slotMaterialColor);
+  /// OrcaSlicer's encoding (nlohmann::json): the same fields, keys in alphabetical order.
+  Map<String, dynamic> toOrcaJson() => {
+        'materialName': materialName,
+        'slotId': slotId,
+        'slotMaterialColor': slotMaterialColor,
+        'toolId': toolId,
+        'toolMaterialColor': toolMaterialColor,
+      };
+
   Map<String, dynamic> toJson() => {
         'toolId': toolId,
         'slotId': slotId,

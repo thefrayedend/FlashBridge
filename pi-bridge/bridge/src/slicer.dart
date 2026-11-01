@@ -615,7 +615,9 @@ class Slicer {
     } on SlicerException catch (e) {
       return {'ok': false, 'message': e.message};
     }
-    final thumb = decodePngDataUrl('${o['thumb'] ?? ''}');
+    // plate picture 512x512, small 128x128, and the printer's own G-code thumbnail (140x110 on Flashforge)
+    final thumb = _Thumbs(decodePngDataUrl('${o['thumb'] ?? ''}'), decodePngDataUrl('${o['thumbSmall'] ?? ''}'),
+        decodePngDataUrl('${o['thumbGcode'] ?? ''}'));
     final name = safeName('${o['name'] ?? 'plate'}');
     // Multi-material printers take OrcaSlicer's sliced project (.gcode.3mf): it carries the filament
     // list the colour matching and the printer's material mapping need. Others get plain G-code.
@@ -671,11 +673,12 @@ class Slicer {
       args.addAll(['--wipe-tower-x=${x.toStringAsFixed(1)}', '--wipe-tower-y=${y.toStringAsFixed(1)}']);
     }
     // Objects stay where they were put in the browser; output: plate_1.gcode + result.json.
-    args.addAll(['--arrange', '0', '--slice', '0', '--outputdir', outDir, '--export-3mf', 'plate.gcode.3mf']);
+    // --min-save: no model mesh in the project, as OrcaSlicer leaves it out of what it sends a printer
+    args.addAll(['--arrange', '0', '--slice', '0', '--min-save', '--outputdir', outDir, '--export-3mf', 'plate.gcode.3mf']);
     return args;
   }
 
-  Future<void> _run(SliceJob j, List<String> args, Uint8List? thumb) async {
+  Future<void> _run(SliceJob j, List<String> args, _Thumbs thumb) async {
     Directory('${j.dir}/out').createSync(recursive: true);
     final log = File('${j.dir}/engine.log').openWrite();
     try {
@@ -725,14 +728,18 @@ class Slicer {
         return;
       }
       final out = File('${j.dir}/preview.gcode');
-      await addThumbnail(g, out, thumb);
+      await addThumbnail(g, out, thumb.gcode ?? thumb.plate);
       g.deleteSync();
       final proj = File('${j.dir}/out/plate.gcode.3mf');
-      if (proj.existsSync() && thumb != null) {
+      if (proj.existsSync()) {
+        // repack like OrcaSlicer's send: the G-code with its thumbnail, its md5, the plate pictures
+        final packed = File('${j.dir}/out/printer.gcode.3mf');
         try {
-          zipAddStored(proj, 'Metadata/plate_1.png', thumb);
+          await packPrinterProject(proj, out, packed, png: thumb.plate, small: thumb.small);
+          packed.renameSync(proj.path);
         } catch (e) {
-          host.log.warn('Could not add the plate picture: $e');
+          host.log.warn('Could not pack the sliced project like OrcaSlicer: $e');
+          if (packed.existsSync()) packed.deleteSync();
         }
       }
       j.project = proj.existsSync() ? proj.path : null;
@@ -1130,11 +1137,12 @@ Future<void> addThumbnail(File src, File dst, Uint8List? png) async {
   final w = (png[16] << 24) | (png[17] << 16) | (png[18] << 8) | png[19];
   final h = (png[20] << 24) | (png[21] << 16) | (png[22] << 8) | png[23];
   final b64 = base64.encode(png);
-  final block = StringBuffer('\n; THUMBNAIL_BLOCK_START\n;\n; thumbnail begin ${w}x$h ${b64.length}\n');
+  // byte for byte OrcaSlicer's block (GCodeThumbnails::export_thumbnails_to_file), right after the header
+  final block = StringBuffer('\n; THUMBNAIL_BLOCK_START\n\n;\n; thumbnail begin ${w}x$h ${b64.length}\n');
   for (var i = 0; i < b64.length; i += 78) {
     block.writeln('; ${b64.substring(i, i + 78 > b64.length ? b64.length : i + 78)}');
   }
-  block.write('; thumbnail end\n;\n; THUMBNAIL_BLOCK_END\n');
+  block.write('; thumbnail end\n; THUMBNAIL_BLOCK_END\n');
   final raf = await src.open();
   final head = await raf.read(65536);
   await raf.close();
@@ -1225,15 +1233,21 @@ int crc32(List<int> data) {
   return c ^ 0xFFFFFFFF;
 }
 
-/// Appends [name] (uncompressed) to the zip file [f]: new entry where the central directory was,
-/// then the old directory plus the new record. Replaces nothing; the name must be new.
-void zipAddStored(File f, String name, Uint8List data) {
-  final raf = f.openSync(mode: FileMode.append);
+/// Packs the sliced project the way OrcaSlicer's "send to printer" does (Plater::send_gcode: no model
+/// mesh, G-code with the printer thumbnail, plate pictures): every entry of the engine's [engine3mf] is
+/// kept as is, except Metadata/plate_1.gcode, which becomes [gcode] (the G-code with its thumbnail
+/// block), its .md5, and the plate pictures [png] (512x512) and [small] (128x128), which the engine
+/// lists in _rels/.rels but cannot draw. Native gzip / md5sum do the heavy lifting (300 MB files).
+Future<void> packPrinterProject(File engine3mf, File gcode, File out, {Uint8List? png, Uint8List? small}) async {
+  final src = engine3mf.openSync();
+  final gz = File('${out.path}.gcode.gz');
+  final dst = out.openSync(mode: FileMode.write);
   try {
-    final len = raf.lengthSync();
+    // ---- the engine's entries (central directory; the engine never writes zip64 below 4 GB)
+    final len = src.lengthSync();
     final tailLen = len < 66000 ? len : 66000;
-    raf.setPositionSync(len - tailLen);
-    final tail = raf.readSync(tailLen);
+    src.setPositionSync(len - tailLen);
+    final tail = src.readSync(tailLen);
     var e = -1;
     for (var i = tail.length - 22; i >= 0; i--) {
       if (tail[i] == 0x50 && tail[i + 1] == 0x4b && tail[i + 2] == 5 && tail[i + 3] == 6) {
@@ -1241,52 +1255,142 @@ void zipAddStored(File f, String name, Uint8List data) {
         break;
       }
     }
-    if (e < 0) throw const FormatException('not a zip file');
+    if (e < 0) throw const FormatException('the sliced project is not a zip file');
     final eocd = ByteData.sublistView(tail, e);
     final count = eocd.getUint16(10, Endian.little);
-    final cdSize = eocd.getUint32(12, Endian.little);
-    final cdOff = eocd.getUint32(16, Endian.little);
-    raf.setPositionSync(cdOff);
-    final cd = raf.readSync(cdSize);
-    final n = utf8.encode(name);
-    final crc = crc32(data);
-    final local = ByteData(30)
-      ..setUint32(0, 0x04034b50, Endian.little)
-      ..setUint16(4, 20, Endian.little)
-      ..setUint32(14, crc, Endian.little)
-      ..setUint32(18, data.length, Endian.little)
-      ..setUint32(22, data.length, Endian.little)
-      ..setUint16(26, n.length, Endian.little);
-    final central = ByteData(46)
-      ..setUint32(0, 0x02014b50, Endian.little)
-      ..setUint16(4, 20, Endian.little)
-      ..setUint16(6, 20, Endian.little)
-      ..setUint32(16, crc, Endian.little)
-      ..setUint32(20, data.length, Endian.little)
-      ..setUint32(24, data.length, Endian.little)
-      ..setUint16(28, n.length, Endian.little)
-      ..setUint32(42, cdOff, Endian.little);
-    final newCdOff = cdOff + 30 + n.length + data.length;
-    final newCdSize = cdSize + 46 + n.length;
+    src.setPositionSync(eocd.getUint32(16, Endian.little));
+    final cd = ByteData.sublistView(src.readSync(eocd.getUint32(12, Endian.little)));
+    final entries = <_ZipEntry>[];
+    var o = 0;
+    for (var k = 0; k < count; k++) {
+      if (cd.getUint32(o, Endian.little) != 0x02014b50) throw const FormatException('bad zip directory');
+      final nl = cd.getUint16(o + 28, Endian.little), xl = cd.getUint16(o + 30, Endian.little), cl = cd.getUint16(o + 32, Endian.little);
+      final csize = cd.getUint32(o + 20, Endian.little), off = cd.getUint32(o + 42, Endian.little);
+      if (csize == 0xFFFFFFFF || off == 0xFFFFFFFF) throw const FormatException('zip64 project');
+      entries.add(_ZipEntry(utf8.decode(cd.buffer.asUint8List(cd.offsetInBytes + o + 46, nl)), cd.getUint16(o + 10, Endian.little),
+          cd.getUint32(o + 16, Endian.little), csize, cd.getUint32(o + 24, Endian.little), off));
+      o += 46 + nl + xl + cl;
+    }
+    // ---- the new G-code: deflate it with gzip (whose body is exactly a zip entry's data) and md5 it
+    final results = await Future.wait([
+      Process.run('sh', ['-c', 'gzip -6 -n -c "\$1" > "\$2"', 'sh', gcode.path, gz.path]),
+      Process.run('md5sum', [gcode.path]),
+    ]);
+    if (results[0].exitCode != 0 || results[1].exitCode != 0) {
+      throw FormatException('packing the G-code failed: ${results[0].stderr}${results[1].stderr}');
+    }
+    final md5 = '${results[1].stdout}'.split(' ').first.toUpperCase();
+    final gzLen = gz.lengthSync();
+    final gzf = gz.openSync();
+    gzf.setPositionSync(gzLen - 8);
+    final trailer = ByteData.sublistView(gzf.readSync(8));
+    final gcodeCrc = trailer.getUint32(0, Endian.little);
+    final gcodeSize = gcode.lengthSync();
+    if (gcodeSize >= 0xFFFFFFFF || gzLen - 18 >= 0xFFFFFFFF) throw const FormatException('G-code over 4 GB');
+
+    final t = DateTime.now();
+    final dosTime = (t.hour << 11) | (t.minute << 5) | (t.second ~/ 2);
+    final dosDate = ((t.year - 1980) << 9) | (t.month << 5) | t.day;
+    final central = BytesBuilder();
+    var n = 0;
+    var pos = 0;
+    // writes a local header, the data via [body], and remembers the central record
+    void add(String name, int method, int crc, int csize, int usize, void Function() body) {
+      final nb = utf8.encode(name);
+      final at = pos;
+      final lh = ByteData(30)
+        ..setUint32(0, 0x04034b50, Endian.little)
+        ..setUint16(4, 20, Endian.little)
+        ..setUint16(6, 0x0800, Endian.little) // UTF-8 names, sizes in the header
+        ..setUint16(8, method, Endian.little)
+        ..setUint16(10, dosTime, Endian.little)
+        ..setUint16(12, dosDate, Endian.little)
+        ..setUint32(14, crc, Endian.little)
+        ..setUint32(18, csize, Endian.little)
+        ..setUint32(22, usize, Endian.little)
+        ..setUint16(26, nb.length, Endian.little);
+      dst
+        ..writeFromSync(lh.buffer.asUint8List())
+        ..writeFromSync(nb);
+      body();
+      pos += 30 + nb.length + csize;
+      final ch = ByteData(46)
+        ..setUint32(0, 0x02014b50, Endian.little)
+        ..setUint16(4, 20, Endian.little)
+        ..setUint16(6, 20, Endian.little)
+        ..setUint16(8, 0x0800, Endian.little)
+        ..setUint16(10, method, Endian.little)
+        ..setUint16(12, dosTime, Endian.little)
+        ..setUint16(14, dosDate, Endian.little)
+        ..setUint32(16, crc, Endian.little)
+        ..setUint32(20, csize, Endian.little)
+        ..setUint32(24, usize, Endian.little)
+        ..setUint16(28, nb.length, Endian.little)
+        ..setUint32(42, at, Endian.little);
+      central
+        ..add(ch.buffer.asUint8List())
+        ..add(nb);
+      n++;
+    }
+
+    void copy(RandomAccessFile from, int start, int length) {
+      from.setPositionSync(start);
+      var left = length;
+      while (left > 0) {
+        final chunk = from.readSync(left < 1 << 20 ? left : 1 << 20);
+        if (chunk.isEmpty) throw const FormatException('unexpected end of file');
+        dst.writeFromSync(chunk);
+        left -= chunk.length;
+      }
+    }
+
+    void addStored(String name, Uint8List data) => add(name, 0, crc32(data), data.length, data.length, () => dst.writeFromSync(data));
+
+    const skip = {'Metadata/plate_1.gcode', 'Metadata/plate_1.gcode.md5', 'Metadata/plate_1.png', 'Metadata/plate_1_small.png'};
+    for (final en in entries) {
+      if (en.name == 'Metadata/plate_1.gcode') {
+        add(en.name, 8, gcodeCrc, gzLen - 18, gcodeSize, () => copy(gzf, 10, gzLen - 18));
+        final m = Uint8List.fromList(ascii.encode(md5));
+        final c = ZLibCodec(raw: true).encode(m);
+        add('Metadata/plate_1.gcode.md5', 8, crc32(m), c.length, m.length, () => dst.writeFromSync(c));
+        continue;
+      }
+      if (skip.contains(en.name)) continue;
+      src.setPositionSync(en.offset);
+      final lh = ByteData.sublistView(src.readSync(30));
+      final dataAt = en.offset + 30 + lh.getUint16(26, Endian.little) + lh.getUint16(28, Endian.little);
+      add(en.name, en.method, en.crc, en.csize, en.usize, () => copy(src, dataAt, en.csize));
+    }
+    if (png != null) addStored('Metadata/plate_1.png', png);
+    if (small != null) addStored('Metadata/plate_1_small.png', small);
+    gzf.closeSync();
+
+    final cdBytes = central.takeBytes();
     final end = ByteData(22)
       ..setUint32(0, 0x06054b50, Endian.little)
-      ..setUint16(8, count + 1, Endian.little)
-      ..setUint16(10, count + 1, Endian.little)
-      ..setUint32(12, newCdSize, Endian.little)
-      ..setUint32(16, newCdOff, Endian.little);
-    raf.truncateSync(cdOff);
-    raf.setPositionSync(cdOff);
-    raf
-      ..writeFromSync(local.buffer.asUint8List())
-      ..writeFromSync(n)
-      ..writeFromSync(data)
-      ..writeFromSync(cd)
-      ..writeFromSync(central.buffer.asUint8List())
-      ..writeFromSync(n)
+      ..setUint16(8, n, Endian.little)
+      ..setUint16(10, n, Endian.little)
+      ..setUint32(12, cdBytes.length, Endian.little)
+      ..setUint32(16, pos, Endian.little);
+    dst
+      ..writeFromSync(cdBytes)
       ..writeFromSync(end.buffer.asUint8List());
   } finally {
-    raf.closeSync();
+    src.closeSync();
+    dst.closeSync();
+    if (gz.existsSync()) gz.deleteSync();
   }
+}
+
+class _Thumbs {
+  final Uint8List? plate, small, gcode;
+  const _Thumbs(this.plate, this.small, this.gcode);
+}
+
+class _ZipEntry {
+  final String name;
+  final int method, crc, csize, usize, offset;
+  _ZipEntry(this.name, this.method, this.crc, this.csize, this.usize, this.offset);
 }
 
 /// A file name from another device, made safe for the inbox folder: no folders, no odd characters.

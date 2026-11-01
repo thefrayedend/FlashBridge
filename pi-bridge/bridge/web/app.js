@@ -204,6 +204,7 @@ function jobStatus(p) {
   if (!p.online) return ['err', 'Offline'];
   if (p.pending) return ['warn', 'Waiting for you'];
   if (unpacking(p)) return ['busy', 'Unpacking the file'];
+  if (p.starting && !['printing', 'paused'].includes(p.jobState)) return ['busy', p.uploadStatus ? 'Sending the file' : 'Starting the print'];
   switch (p.jobState) {
     case 'printing': return ['busy', `Printing ${Math.round(p.progress * 100)}%`];
     case 'paused': return ['warn', 'Paused'];
@@ -368,10 +369,21 @@ function renderJob(p) {
     sub = p.autoClearPlatform ? 'Finished — clearing the platform automatically…'
       : (p.jobState === 'complete' ? 'Finished — take the print off, then press Clear platform.' : 'Cancelled — press Clear platform before the next print.');
     actions = clearBtn(true) + '<button class="btn" data-act="files">Print a file</button>';
-  } else if (unpacking(p)) {
-    title = 'Getting the print ready';
-    sub = 'The printer is unpacking the file. Big files can take several minutes, then it starts heating. '
-      + 'If this lasts over 20 minutes, the file on the printer is probably broken: turn the printer off and on and print it again.';
+  } else if (unpacking(p) || p.starting) {
+    // From Start print until the printer says "printing": sending, unpacking, getting ready
+    const secs = p.starting ? Math.max(0, Math.round((Date.now() - Date.parse(p.starting.at)) / 1000)) : 0;
+    const since = p.starting ? (secs < 60 ? `${secs}s` : fmtTime(secs)) : '';
+    title = p.starting ? `Starting ${prettyName(p.starting.file)}` : 'Getting the print ready';
+    if (p.uploadStatus) {
+      sub = `${p.uploadStatus.replace(/\.\.\.$/, '…')} Big files take a few minutes.`;
+    } else if (unpacking(p)) {
+      sub = 'The printer is unpacking the file. Big files can take several minutes, then it starts heating. '
+        + 'If this lasts over 20 minutes, the file on the printer is probably broken: turn the printer off and on and print it again.';
+    } else {
+      sub = `Waiting for the printer to start${p.machineState && p.machineState !== 'ready' ? ` (it says "${p.machineState}")` : ''}.`;
+    }
+    if (since) stats = `<span><b>${since}</b> since Start print</span>`;
+    actions = '<button class="btn" data-act="files">Print a file</button>';
   } else {
     title = 'Ready to print';
     sub = p.uploadStatus || p.model || '';

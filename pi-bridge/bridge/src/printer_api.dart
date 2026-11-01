@@ -19,6 +19,21 @@ class PrinterApi {
   /// uploading in the background): {message, at}. Shown by the page as an error; cleared by the next start.
   final Map<String, Map<String, String>> _printError = {};
 
+  /// A print being sent / started: {file, at}. Shown by the page until the printer reports printing
+  /// (sending, then unpacking, then heating can take minutes on big files); cleared on failure.
+  final Map<String, Map<String, String>> _starting = {};
+
+  Map<String, String>? _startingFor(PrinterBridge b) {
+    final s = _starting[b.cfg.id];
+    if (s == null) return null;
+    final age = DateTime.now().difference(DateTime.parse(s['at']!));
+    if (b.jobState == 'printing' || b.jobState == 'paused' || age > const Duration(minutes: 45)) {
+      _starting.remove(b.cfg.id);
+      return null;
+    }
+    return s;
+  }
+
   // ------------------------------------------------------------------ state for the home view
   /// Extra live fields for one printer (merged into the setup server's printer JSON).
   Map<String, dynamic> liveJson(PrinterBridge? b) {
@@ -27,6 +42,7 @@ class PrinterApi {
     final c = b.client;
     return {
       'printError': _printError[b.cfg.id],
+      'starting': _startingFor(b),
       'model': d.model,
       'kind': c.isCreator5 ? 'creator5' : (c.isAD5X ? 'ad5x' : (c.isPro ? '5mpro' : '5m')),
       'machineState': d.status,
@@ -224,6 +240,7 @@ class PrinterApi {
     final c = Completer<Map<String, dynamic>>();
     var answered = false; // the page got "sending…" after 4 s; a later failure goes to the status
     _printError.remove(b.cfg.id);
+    _starting[b.cfg.id] = {'file': what, 'at': DateTime.now().toUtc().toIso8601String()};
     host.log.info('Print: $what on ${b.cfg.name}');
     job().then((_) {
       host.log.info('Print started: $what on ${b.cfg.name}');
@@ -231,6 +248,7 @@ class PrinterApi {
     }).catchError((Object e) {
       final msg = e is RpcError ? e.message : e.toString().replaceFirst(RegExp(r'^\w*Exception: '), '');
       host.log.warn('Print failed: $what on ${b.cfg.name}: $msg');
+      _starting.remove(b.cfg.id);
       if (answered) {
         // the page was already told "sending…": keep it for the status, so it shows up there
         _printError[b.cfg.id] = {'message': 'The print did not start: $msg', 'at': DateTime.now().toIso8601String()};

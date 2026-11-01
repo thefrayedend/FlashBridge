@@ -58,7 +58,8 @@ class MappingPlan {
           MaterialMapping(
             l.filament.index.clamp(0, 3),
             l.slot.slotId,
-            l.filament.type.isEmpty ? (l.slot.material.isEmpty ? 'PLA' : l.slot.material) : l.filament.type,
+            // OrcaSlicer sends the slot's material name (what the printer has loaded)
+            l.slot.material.isNotEmpty ? l.slot.material : (l.filament.type.isEmpty ? 'PLA' : l.filament.type),
             l.filament.color,
             l.slot.color,
           )
