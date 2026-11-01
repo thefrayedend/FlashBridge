@@ -10,6 +10,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- the app updates itself from its GitHub release -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- the slicer page's "Add model" and the camera page can pick files / show media -->
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
 
@@ -80,6 +82,10 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Shows the live progress of a 3D print running on the user's own printer and alerts when it finishes or fails." />
         </service>
+
+        <receiver
+            android:name=".InstallReceiver"
+            android:exported="false" />
 
         <receiver
             android:name=".BootReceiver"

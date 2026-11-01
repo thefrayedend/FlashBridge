@@ -9,6 +9,7 @@ import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Bundle
 import android.provider.OpenableColumns
+import android.provider.Settings
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -40,6 +41,7 @@ class MainActivity : FlutterActivity() {
                         "board" to (prefs.getString("board", "") ?: ""),
                         "host" to (prefs.getString("host", "creator5.local") ?: "creator5.local"),
                         "watch" to prefs.getBoolean("watch", false),
+                        "autoUpdate" to prefs.getBoolean("autoUpdate", true),
                     )
                 )
                 "setSettings" -> {
@@ -47,6 +49,7 @@ class MainActivity : FlutterActivity() {
                     call.argument<String>("board")?.let { e.putString("board", it) }
                     call.argument<String>("host")?.let { e.putString("host", it) }
                     call.argument<Boolean>("watch")?.let { e.putBoolean("watch", it) }
+                    call.argument<Boolean>("autoUpdate")?.let { e.putBoolean("autoUpdate", it) }
                     e.apply()
                     applyWatch(prefs.getBoolean("watch", false), prefs.getString("board", "") ?: "")
                     result.success(true)
@@ -84,6 +87,29 @@ class MainActivity : FlutterActivity() {
                     result.success(true)
                 }
                 "cacheDir" -> result.success(cacheDir.absolutePath)
+                "installApk" -> {
+                    val path = call.argument<String>("path")
+                    if (path == null) {
+                        result.success("error: no file")
+                    } else if (Build.VERSION.SDK_INT >= 26 && !packageManager.canRequestPackageInstalls()) {
+                        // once: Android asks to allow "Install unknown apps" for Flash Bridge
+                        try {
+                            startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
+                        } catch (e: Exception) {
+                        }
+                        result.success("permission")
+                    } else {
+                        Thread {
+                            val r = try {
+                                Updater.install(this, File(path))
+                                "started"
+                            } catch (e: Exception) {
+                                "error: ${e.message}"
+                            }
+                            runOnUiThread { result.success(r) }
+                        }.start()
+                    }
+                }
                 "appVersion" -> result.success(
                     try {
                         packageManager.getPackageInfo(packageName, 0).versionName ?: ""

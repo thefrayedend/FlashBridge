@@ -1,11 +1,13 @@
 // Flash Bridge for Android: the board's printer and slicer pages, a model-site browser whose downloads
 // open in the slicer, Open with / Share for models and G-code, and print notifications.
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'app_model.dart';
+import 'app_update.dart';
 import 'board.dart';
 import 'board_view.dart';
 import 'browser_view.dart';
@@ -62,6 +64,7 @@ class _ShellState extends State<Shell> {
 
   @override
   void dispose() {
+    _updateTimer?.cancel();
     app.removeListener(_changed);
     super.dispose();
   }
@@ -70,11 +73,24 @@ class _ShellState extends State<Shell> {
     if (mounted) setState(() {});
   }
 
+  Timer? _updateTimer;
+
   Future<void> _start() async {
     await app.load();
+    final s = await Native.getSettings();
+    AppUpdate.autoUpdate = s['autoUpdate'] != false;
     final ok = await app.connect();
     if (!ok && mounted) setState(() => _tab = 3);
     await _drainIncoming();
+    // the app keeps itself up to date, like the board (app_update.dart)
+    Future.delayed(const Duration(seconds: 20), _autoUpdate);
+    _updateTimer = Timer.periodic(const Duration(hours: 12), (_) => _autoUpdate());
+  }
+
+  Future<void> _autoUpdate() async {
+    if (!AppUpdate.autoUpdate) return;
+    final r = await AppUpdate.check();
+    if (r.startsWith('Allow') || r.startsWith('The update')) _snack(r);
   }
 
   int get _stackIndex => _tab <= 1 ? 0 : _tab - 1;

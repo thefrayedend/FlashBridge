@@ -28,13 +28,18 @@ class Native {
     return Map<String, dynamic>.from(r ?? const {});
   }
 
-  static Future<void> setSettings({String? board, String? host, bool? watch}) async {
+  static Future<void> setSettings({String? board, String? host, bool? watch, bool? autoUpdate}) async {
     await _ch.invokeMethod<bool>('setSettings', <String, dynamic>{
       if (board != null) 'board': board,
       if (host != null) 'host': host,
       if (watch != null) 'watch': watch,
+      if (autoUpdate != null) 'autoUpdate': autoUpdate,
     });
   }
+
+  /// Hands a downloaded APK to Android's installer: 'started', 'permission' (the user is being asked to
+  /// allow installs once), or 'error: …'.
+  static Future<String> installApk(String path) async => await _ch.invokeMethod<String>('installApk', {'path': path}) ?? 'error';
 
   /// Asks for the notification permission (Android 13+); true when it is already granted.
   static Future<bool> requestNotifications() async => await _ch.invokeMethod<bool>('requestNotifications') ?? false;

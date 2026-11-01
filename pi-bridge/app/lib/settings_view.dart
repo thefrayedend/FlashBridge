@@ -1,16 +1,11 @@
 // The app's own settings: which board, notifications, model sites, app version and updates.
-import 'dart:convert';
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 
 import 'app_model.dart';
-import 'board.dart';
+import 'app_update.dart';
 import 'discovery.dart';
 import 'native.dart';
 
-/// Where GitHub Actions publishes the app (see .github/workflows/build-app.yml).
-const appReleaseBase = 'https://github.com/thefrayedend/ffbridge-pi/releases/download/latest-app';
 
 class SettingsView extends StatefulWidget {
   const SettingsView({super.key});
@@ -63,23 +58,8 @@ class _SettingsViewState extends State<SettingsView> {
 
   Future<void> _checkUpdate() async {
     setState(() => _update = 'Checking…');
-    final c = HttpClient()..connectionTimeout = const Duration(seconds: 10);
-    try {
-      final req = await c.getUrl(Uri.parse('$appReleaseBase/flash-bridge-app.json'));
-      final res = await req.close();
-      final j = jsonDecode(await utf8.decodeStream(res)) as Map<String, dynamic>;
-      final latest = '${j['version'] ?? ''}';
-      if (isNewerVersion(latest, _version)) {
-        setState(() => _update = 'Version $latest is out. Opening the download: install it over this one.');
-        await Native.openExternal('$appReleaseBase/${j['apk'] ?? 'flash-bridge.apk'}');
-      } else {
-        setState(() => _update = 'This is the latest version ($_version).');
-      }
-    } catch (e) {
-      setState(() => _update = 'Could not check for updates (no internet?).');
-    } finally {
-      c.close(force: true);
-    }
+    final r = await AppUpdate.check(manual: true);
+    if (mounted) setState(() => _update = r);
   }
 
   @override
@@ -171,7 +151,18 @@ class _SettingsViewState extends State<SettingsView> {
             const SizedBox(height: 4),
             Text('Flash Bridge for Android $_version', style: t.bodyMedium),
             if (_update != null) ...[const SizedBox(height: 6), Text(_update!, style: t.bodySmall)],
-            const SizedBox(height: 12),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              value: AppUpdate.autoUpdate,
+              onChanged: (v) async {
+                setState(() => AppUpdate.autoUpdate = v);
+                await Native.setSettings(autoUpdate: v);
+              },
+              title: const Text('Update the app by itself'),
+              subtitle: const Text('Checks GitHub when the app opens and every 12 hours, and installs new versions. '
+                  'Android asks once to allow it; on Android 12 and newer, later updates need no tap.'),
+            ),
+            const SizedBox(height: 4),
             Wrap(spacing: 8, runSpacing: 8, children: [
               OutlinedButton(onPressed: _checkUpdate, child: const Text('Check for updates')),
               if (app.boardUrl.isNotEmpty) OutlinedButton(onPressed: () => Native.openExternal('${app.boardUrl}/'), child: const Text('Open the board in the browser')),
