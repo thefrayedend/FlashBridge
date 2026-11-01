@@ -197,10 +197,13 @@ function current() {
   const ps = printers();
   return ps.find((p) => p.id === state.sel) || ps[0] || null;
 }
+// The printer unzips a .gcode.3mf before it heats up; it reports "unzipping" while it does.
+const unpacking = (p) => /unzip/i.test(p.machineState || '') && !['printing', 'paused'].includes(p.jobState);
 function jobStatus(p) {
   if (!p.enabled) return ['', 'Disabled'];
   if (!p.online) return ['err', 'Offline'];
   if (p.pending) return ['warn', 'Waiting for you'];
+  if (unpacking(p)) return ['busy', 'Unpacking the file'];
   switch (p.jobState) {
     case 'printing': return ['busy', `Printing ${Math.round(p.progress * 100)}%`];
     case 'paused': return ['warn', 'Paused'];
@@ -365,6 +368,10 @@ function renderJob(p) {
     sub = p.autoClearPlatform ? 'Finished — clearing the platform automatically…'
       : (p.jobState === 'complete' ? 'Finished — take the print off, then press Clear platform.' : 'Cancelled — press Clear platform before the next print.');
     actions = clearBtn(true) + '<button class="btn" data-act="files">Print a file</button>';
+  } else if (unpacking(p)) {
+    title = 'Getting the print ready';
+    sub = 'The printer is unpacking the file. Big files can take several minutes, then it starts heating. '
+      + 'If this lasts over 20 minutes, the file on the printer is probably broken: turn the printer off and on and print it again.';
   } else {
     title = 'Ready to print';
     sub = p.uploadStatus || p.model || '';

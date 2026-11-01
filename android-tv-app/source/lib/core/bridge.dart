@@ -483,7 +483,9 @@ class PrinterBridge {
     filename = files.resolve(filename);
     final name = filename.split('/').last;
     final local = files.fileFor('gcodes', filename);
-    final onPrinter = files.printerFiles.containsKey(name);
+    // The printer's copy is only trusted when the board sent exactly this file there and the upload
+    // finished: a re-sliced file keeps its name, and a cut-off upload leaves a broken copy in the list.
+    final onPrinter = local.existsSync() ? _printerHasCurrent(local, name) : files.printerFiles.containsKey(name);
     if (mappings == null) {
       final plan = smartMapping(filename);
       if (plan != null) {
@@ -522,9 +524,16 @@ class PrinterBridge {
         }
       }
     } catch (e) {
+      final why = _reason(e);
+      log.warn('The printer would not start $name: $why');
       if (local.existsSync()) {
-        gcodeResponse('// Printer did not accept the stored file, re-uploading...');
-        await uploadToPrinter(local, name, printNow: true, mappings: mappings);
+        gcodeResponse('// Printer did not accept the stored file ($why), re-uploading...');
+        try {
+          await uploadToPrinter(local, name, printNow: true, mappings: mappings);
+        } catch (e2) {
+          log.warn('Sending $name again failed: ${_reason(e2)}');
+          throw FlashForgeException('The printer would not start it ($why), and sending it again failed: ${_reason(e2)}');
+        }
       } else {
         rethrow;
       }
@@ -623,6 +632,49 @@ class PrinterBridge {
     _notify();
   }
 
+  // name -> "size:modified" of the board file the printer has a complete copy of (survives restarts)
+  File get _sentFile => File('$dataDir/sent_to_printer.json');
+  Map<String, String>? _sentCache;
+  Map<String, String> get _sent {
+    if (_sentCache != null) return _sentCache!;
+    try {
+      _sentCache = Map<String, String>.from(jsonDecode(_sentFile.readAsStringSync()) as Map);
+    } catch (_) {
+      _sentCache = {};
+    }
+    return _sentCache!;
+  }
+
+  static String _signature(File f) {
+    final st = f.statSync();
+    return '${st.size}:${st.modified.millisecondsSinceEpoch}';
+  }
+
+  bool _printerHasCurrent(File local, String name) {
+    if (!files.printerFiles.containsKey(name)) return false;
+    try {
+      return _sent[name] == _signature(local);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  void _recordSent(File f, String name) {
+    try {
+      final m = _sent..[name] = _signature(f);
+      m.removeWhere((k, _) => !files.printerFiles.containsKey(k) && k != name);
+      _sentFile.writeAsStringSync(jsonEncode(m));
+    } catch (e) {
+      log.warn('Could not note the upload of $name: $e');
+    }
+  }
+
+  static String _reason(Object e) => e is FlashForgeException
+      ? e.message
+      : e is RpcError
+          ? e.message
+          : e.toString().replaceFirst(RegExp(r'^\w*Exception: '), '');
+
   Future<void> uploadToPrinter(File f, String name, {bool printNow = false, List<MaterialMapping>? mappings}) async {
     final tools = files.toolCount(name);
     var lastPct = -10;
@@ -640,6 +692,7 @@ class PrinterBridge {
         }
       });
       files.printerFiles[name] = DateTime.now().millisecondsSinceEpoch / 1000.0;
+      _recordSent(f, name);
       gcodeResponse('// Upload to printer complete: $name');
     } finally {
       uploadStatus = '';

@@ -19,7 +19,8 @@ setup page, Spoolman, Discord, and AI print-failure detection (Obico model, runs
 
 ## What's new
 
-- **Starting a print is clearer:** after Start print the page switches to the camera view, where the upload to the printer shows. If the printer refuses the file or the upload fails, a red message says why (it used to fail silently on big files), and the board's log records every print start and failure.
+- **Prints start the right file:** the board used to start the printer's own copy whenever the printer already had a file with that name. That could be an older slice of the same model, or a broken copy left by an upload that was cut off (the printer then sits on "unzipping" forever). Now the board sends its file again unless it knows the printer has exactly that file, complete.
+- **Starting a print is clearer:** after Start print the page switches to the camera view, where the upload to the printer shows. While the printer unpacks a big file it says "Getting the print ready" instead of "Ready". If the printer refuses the file or hangs up during the upload, the message says what the printer answered instead of "Broken pipe". The board's log records every print start and failure.
 - **Slicer, built in** (Settings → General → Slicer → Download the slicer engine, once). New **Prepare · Paint · Preview** buttons in the top bar:
   - Prepare: add STL / OBJ / 3MF (MakerWorld, Bambu, Orca projects too), move / rotate / scale, lay on face, auto-orient, arrange, filament per object, quality profile + all print settings.
   - Preview: slices on the board with the real OrcaSlicer engine and shows the print layer by layer (by filament or line type), print time and filament used. Print… goes straight into the filament check.

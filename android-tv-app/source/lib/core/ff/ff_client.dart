@@ -353,20 +353,32 @@ class FlashForgeClient {
       // Wait briefly for "100 Continue" (proceed anyway after 2 s, like curl).
       await gotData.future.timeout(const Duration(seconds: 2), onTimeout: () {});
       final early = utf8.decode(resp.toBytes(), allowMalformed: true);
-      if (early.startsWith('HTTP/1.1 4') || early.startsWith('HTTP/1.1 5')) {
-        throw FlashForgeException('Upload rejected: ${early.split('\r\n').first}');
+      // Anything but "100 Continue" is the printer's final answer (it says no with "200" and an error code too).
+      if (early.startsWith('HTTP/') && !early.startsWith('HTTP/1.1 100')) {
+        await done.future.timeout(const Duration(seconds: 2), onTimeout: () {}).catchError((_) {});
+        throw FlashForgeException('Upload rejected: ${_printerSaid(utf8.decode(resp.toBytes(), allowMalformed: true))}');
       }
       resp.clear();
-      sock.add(pre);
       var sent = 0;
-      await for (final chunk in file.openRead()) {
-        sock.add(chunk);
-        sent += chunk.length;
-        onProgress?.call(sent, size);
+      try {
+        sock.add(pre);
+        await for (final chunk in file.openRead()) {
+          sock.add(chunk);
+          sent += chunk.length;
+          onProgress?.call(sent, size);
+          await sock.flush();
+        }
+        sock.add(post);
         await sock.flush();
+      } on SocketException {
+        // The printer hung up mid-upload: it usually answered first, so read why instead of "broken pipe".
+        await done.future.timeout(const Duration(seconds: 3), onTimeout: () {}).catchError((_) {});
+        final said = _printerSaid(utf8.decode(resp.toBytes(), allowMalformed: true));
+        final mb = (int n) => (n / 1048576).toStringAsFixed(1);
+        throw FlashForgeException(said.isNotEmpty
+            ? 'Upload rejected: $said (after ${mb(sent)} of ${mb(size)} MB)'
+            : 'The printer closed the connection after ${mb(sent)} of ${mb(size)} MB of the upload, without saying why');
       }
-      sock.add(post);
-      await sock.flush();
       await done.future.timeout(const Duration(minutes: 3), onTimeout: () {});
     } finally {
       sock.destroy();
@@ -389,6 +401,28 @@ class FlashForgeClient {
     } on FormatException {
       // non-JSON body with 200: treat as success
     }
+  }
+
+  /// The printer's answer in words: its JSON message (or code), else the HTTP status line; '' when it sent nothing.
+  static String _printerSaid(String text) {
+    while (text.startsWith('HTTP/1.1 100')) {
+      final i = text.indexOf('\r\n\r\n');
+      if (i < 0) return '';
+      text = text.substring(i + 4);
+    }
+    if (text.trim().isEmpty) return '';
+    final status = text.split('\r\n').first.trim();
+    final i = text.indexOf('{');
+    if (i >= 0) {
+      try {
+        final j = jsonDecode(text.substring(i, text.lastIndexOf('}') + 1));
+        if (j is Map) {
+          final m = '${j['message'] ?? ''}'.trim();
+          return m.isNotEmpty && m != 'Success' ? '$m (code ${j['code']})' : 'code ${j['code']}';
+        }
+      } catch (_) {}
+    }
+    return status;
   }
 
   static String _dechunk(String s) {
