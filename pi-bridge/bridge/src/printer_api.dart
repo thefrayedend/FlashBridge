@@ -15,6 +15,10 @@ class PrinterApi {
 
   PrinterBridge? bridge(String id) => host.instances[id]?.bridge;
 
+  /// The last print start that failed after the page already got its answer (big files keep
+  /// uploading in the background): {message, at}. Shown by the page as an error; cleared by the next start.
+  final Map<String, Map<String, String>> _printError = {};
+
   // ------------------------------------------------------------------ state for the home view
   /// Extra live fields for one printer (merged into the setup server's printer JSON).
   Map<String, dynamic> liveJson(PrinterBridge? b) {
@@ -22,6 +26,7 @@ class PrinterApi {
     if (b == null || d == null) return {'slots': [], 'pending': null};
     final c = b.client;
     return {
+      'printError': _printError[b.cfg.id],
       'model': d.model,
       'kind': c.isCreator5 ? 'creator5' : (c.isAD5X ? 'ad5x' : (c.isPro ? '5mpro' : '5m')),
       'machineState': d.status,
@@ -215,15 +220,28 @@ class PrinterApi {
   // ------------------------------------------------------------------ printing
   /// Runs [job] but answers after a few seconds at the latest: sending a big file to the
   /// printer can take a while, and the page shows the progress from the status anyway.
-  Future<Map<String, dynamic>> _soon(Future<void> Function() job, String okMessage) async {
+  Future<Map<String, dynamic>> _soon(PrinterBridge b, String what, Future<void> Function() job, String okMessage) async {
     final c = Completer<Map<String, dynamic>>();
+    var answered = false; // the page got "sending…" after 4 s; a later failure goes to the status
+    _printError.remove(b.cfg.id);
+    host.log.info('Print: $what on ${b.cfg.name}');
     job().then((_) {
-      if (!c.isCompleted) c.complete({'ok': true, 'message': okMessage});
+      host.log.info('Print started: $what on ${b.cfg.name}');
+      if (!answered) c.complete({'ok': true, 'message': okMessage});
     }).catchError((Object e) {
-      final msg = e is RpcError ? e.message : e.toString();
-      if (!c.isCompleted) c.complete({'ok': false, 'message': msg});
+      final msg = e is RpcError ? e.message : e.toString().replaceFirst(RegExp(r'^\w*Exception: '), '');
+      host.log.warn('Print failed: $what on ${b.cfg.name}: $msg');
+      if (answered) {
+        // the page was already told "sending…": keep it for the status, so it shows up there
+        _printError[b.cfg.id] = {'message': 'The print did not start: $msg', 'at': DateTime.now().toIso8601String()};
+      } else {
+        c.complete({'ok': false, 'message': msg});
+      }
     });
-    return c.future.timeout(const Duration(seconds: 4), onTimeout: () => {'ok': true, 'message': 'Sending the file to the printer…'});
+    return c.future.timeout(const Duration(seconds: 4), onTimeout: () {
+      answered = true;
+      return {'ok': true, 'message': 'Sending the file to the printer…', 'sending': true};
+    });
   }
 
   Future<Map<String, dynamic>> _print(PrinterBridge b, Map<String, dynamic> body) async {
@@ -245,7 +263,7 @@ class PrinterApi {
       mappings = plan.toMappings();
     }
     final level = body['level'];
-    return _soon(() async {
+    return _soon(b, file, () async {
       final old = b.cfg.levelBeforePrint;
       if (level is bool) b.cfg.levelBeforePrint = level;
       try {
@@ -271,7 +289,7 @@ class PrinterApi {
         return {'ok': false, 'message': e.message};
       }
     }
-    return _soon(b.confirmPendingPrint, 'Print started.');
+    return _soon(b, b.pendingMapping?.file ?? 'the waiting print', b.confirmPendingPrint, 'Print started.');
   }
 
   // ------------------------------------------------------------------ controls

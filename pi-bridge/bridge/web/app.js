@@ -173,6 +173,16 @@ async function refreshStatus() {
     if (state.view === 'slicer' && !slicerOn()) location.hash = '#home';
     $('#update-dot').classList.toggle('hidden', !(s.update && s.update.available));
     if (state.view === 'home') renderHome();
+    // a print that failed after its dialog closed (big files upload in the background)
+    const firstLook = !state.printErrSeen; // errors from before this page was opened are not shown
+    state.printErrSeen = state.printErrSeen || {};
+    for (const p of s.printers) {
+      const e = p.printError;
+      if (e && e.at !== state.printErrSeen[p.id]) {
+        state.printErrSeen[p.id] = e.at;
+        if (!firstLook) toast(`${p.name}: ${e.message}`, true);
+      }
+    }
     if (state.view === 'settings' && state.tab === 'advanced') {
       if (state.sub === 'printers') renderPrinterList(false);
       if (state.sub === 'ai') renderAiPrinters();
@@ -698,6 +708,8 @@ $('#pr-start').addEventListener('click', async () => {
   if (!r.ok) { notice(msg, r.message || 'Could not start the print.', 'err'); return; }
   $('#print-dialog').close();
   toast(r.message || 'Print started');
+  // watch it happen: the printer view shows the camera, the upload progress, then the print
+  if (state.view !== 'home') location.hash = '#home';
   setTimeout(refreshStatus, 1000);
 });
 $('#pr-cancel').addEventListener('click', async () => {
