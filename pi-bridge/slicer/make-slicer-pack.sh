@@ -4,8 +4,8 @@
 #
 #   bash pi-bridge/slicer/make-slicer-pack.sh --out DIR
 #
-# The engine is Helio Additive's slicer-cli (the OrcaSlicer engine as a command-line program,
-# AGPL-3.0). It needs a newer C library (glibc 2.35) than the board's Debian bullseye (2.31),
+# The engine is our fork of Helio Additive's slicer-cli (the OrcaSlicer engine as a
+# command-line program, AGPL-3.0); see ENGINE_REPO below. It needs a newer C library (glibc 2.35) than the board's Debian bullseye (2.31),
 # so the pack carries the runner's own C library in rt/ and the engine program is pointed at
 # that loader. Nothing on the board's system is changed: it all lives in
 # /var/lib/ffbridge/slicer/engine.
@@ -15,9 +15,14 @@
 # are kept: the slicer can only ever pick Flashforge profiles, and the engine starts ~6x faster.
 set -euo pipefail
 
-ENGINE_VERSION="v0.1.0-dev-19"
-ENGINE_URL="https://github.com/Helio-Additive/slicer-cli/releases/download/slicer-cli/${ENGINE_VERSION}/slicer-cli-${ENGINE_VERSION}-linux-arm64.tar.gz"
-ENGINE_SHA256="41f35cfd8bf767fab3af6f869de96b7bd906fefc9967e3517286ade17dec7eca"
+# Our fork of Helio's slicer-cli (same OrcaSlicer 2.4.2 engine, pin 8500fcd) with "lean mode":
+# the G-code processor no longer keeps a record of every move for the desktop preview, which
+# on a 4 GB board was the difference between slicing a detailed painted helmet (1.65 GB) and
+# running out of memory (2.7 GB). Source and the override file: the fork repo below.
+ENGINE_VERSION="v0.1.0-dev-19-ffb1"
+ENGINE_REPO="https://github.com/thefrayedend/slicer-cli"
+ENGINE_URL="${ENGINE_REPO}/releases/download/slicer-cli/${ENGINE_VERSION}/slicer-cli-${ENGINE_VERSION}-linux-arm64.tar.gz"
+ENGINE_SHA256="efe2b76ec46efd15f559bfa58353e13dd1a4442e4f81ebfccfbf69514ac61f36"
 # Where the board unpacks it (the bridge's data folder). The loader path is baked into the program.
 INSTALL_DIR="/var/lib/ffbridge/slicer/engine"
 
@@ -76,8 +81,9 @@ cp /usr/share/doc/libc6/copyright "$E/rt/GLIBC-COPYRIGHT.txt" 2>/dev/null || tru
 patchelf --set-interpreter "$INSTALL_DIR/rt/ld-linux-aarch64.so.1" "$E/bin/slicer_cli-orcaslicer"
 cat > "$E/FFBRIDGE.txt" <<EOF
 OrcaSlicer engine for FlashForge Bridge
-Engine: Helio Additive slicer-cli $ENGINE_VERSION (OrcaSlicer 2.4 engine), AGPL-3.0-or-later.
-Source: https://github.com/Helio-Additive/slicer-cli  (this pack: trimmed to Flashforge profiles,
+Engine: slicer-cli $ENGINE_VERSION (OrcaSlicer 2.4 engine), AGPL-3.0-or-later. A fork of Helio Additive's
+slicer-cli with a lean-memory G-code processor (override file libslic3r/orcaslicer/libslic3r/GCode/GCodeProcessor.cpp).
+Source: $ENGINE_REPO  (upstream: https://github.com/Helio-Additive/slicer-cli; this pack: trimmed to Flashforge profiles,
 program loader set to $INSTALL_DIR/rt, C library from Ubuntu 24.04 in rt/ - LGPL, see rt/GLIBC-COPYRIGHT.txt)
 EOF
 echo "$ENGINE_VERSION" > "$E/VERSION"

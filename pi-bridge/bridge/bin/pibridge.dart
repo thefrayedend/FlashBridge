@@ -93,6 +93,9 @@ Future<void> main(List<String> args) async {
   await setup.start();
   if (!args.contains('--no-ai')) ai.start();
   updater.start();
+  // a newer slicer engine pack (published with a bridge update) is fetched by itself
+  Timer(const Duration(seconds: 90), () => unawaited(slicer.checkEngineUpdate()));
+  Timer.periodic(const Duration(hours: 24), (_) => unawaited(slicer.checkEngineUpdate()));
   final finder = PrinterFinder(host)..start(); // follows printers that got a new network address
 
   BootConfig? boot;

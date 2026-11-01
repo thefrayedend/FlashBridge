@@ -1,4 +1,4 @@
-// Slicer: the OrcaSlicer engine (Helio Additive's slicer-cli, AGPL-3.0) behind the web UI.
+// Slicer: the OrcaSlicer engine (our fork of Helio Additive's slicer-cli, AGPL-3.0) behind the web UI.
 //
 // The browser does the 3D work (placing, painting, previewing) and sends the plate as a 3MF.
 // The board runs the engine with the selected printer's Flashforge profiles and hands the
@@ -19,7 +19,7 @@ import 'dart:typed_data';
 import 'core.dart';
 import 'pi_config.dart';
 
-const slicerSourceUrl = 'https://github.com/Helio-Additive/slicer-cli';
+const slicerSourceUrl = 'https://github.com/thefrayedend/slicer-cli'; // our fork of Helio Additive's slicer-cli (lean memory)
 
 class Slicer {
   final BridgeHost host;
@@ -376,6 +376,37 @@ class Slicer {
     return {'ok': true};
   }
 
+  /// A newer engine pack than the one installed (published with a bridge update): fetch it in
+  /// the background. Called at start and once a day; skipped while a slice runs. The engine
+  /// folder is swapped in one rename, so a slice before the swap uses the old engine and one
+  /// after it the new.
+  Future<void> checkEngineUpdate() async {
+    if (!installed || engineOverride != null || repo.isEmpty || _busyInstall || running != null) return;
+    try {
+      final client = HttpClient()..connectionTimeout = const Duration(seconds: 20);
+      try {
+        final req = await client.getUrl(Uri.parse('https://github.com/$repo/releases/download/latest-image/ffbridge-slicer.json'));
+        final res = await req.close().timeout(const Duration(seconds: 40));
+        if (res.statusCode != 200) {
+          await res.drain<void>();
+          return;
+        }
+        final meta = jsonDecode(await utf8.decodeStream(res)) as Map<String, dynamic>;
+        final latest = '${meta['engine'] ?? ''}';
+        if (latest.isEmpty || latest == engineVersion) return;
+        host.log.info('Slicer engine update: $latest (installed $engineVersion)');
+      } finally {
+        client.close(force: true);
+      }
+      if (running != null) return; // a slice started meanwhile
+      installState = {'state': 'downloading', 'percent': 0, 'message': 'Getting the new slicer engine…'};
+      await _install();
+    } catch (e) {
+      installState = {'state': 'error', 'message': e is SlicerException ? e.message : 'Download failed: $e'};
+      host.log.warn('Slicer engine update failed: $e');
+    }
+  }
+
   Future<void> _install() async {
     final base = 'https://github.com/$repo/releases/download/latest-image';
     final client = HttpClient()..connectionTimeout = const Duration(seconds: 20);
@@ -474,6 +505,7 @@ class Slicer {
 
   Future<Map<String, dynamic>> startSlice(HttpRequest req) async {
     if (!installed) return {'ok': false, 'message': 'The slicer engine is not installed (Settings → General → Slicer).'};
+    if (_busyInstall) return {'ok': false, 'message': 'The slicer engine is being updated. Try again in a minute.'};
     if (running != null || _starting) return {'ok': false, 'message': 'A slice is already running.'};
     final boundary = req.headers.contentType?.parameters['boundary'];
     if (boundary == null) return {'ok': false, 'message': 'Expected the plate as a file upload.'};
@@ -644,7 +676,28 @@ class Slicer {
       await log.close();
       final m = File('${j.dir}/plate.3mf');
       if (m.existsSync()) m.deleteSync();
+      _history(j, args);
     }
+  }
+
+  /// One line per slice in <data>/slicer/history.log, on the SD card: what was sliced, with which
+  /// options, how much memory the engine reached and how it ended. Survives a power cut, which the
+  /// system log (in memory on this board) does not; /api/system/diag shows the last lines.
+  void _history(SliceJob j, List<String> args) {
+    try {
+      final f = File('$dir/history.log');
+      final opts = args.where((a) => a.startsWith('--') && a.contains('=')).join(' ');
+      final m = j.mem;
+      final line = '${DateTime.now().toIso8601String()} ${j.state} ${j.seconds}s'
+          '${m != null ? ' peak=${m['peak']}MB swap=${m['swap']}MB avail=${m['avail']}MB' : ''}'
+          ' engine=$engineVersion plate=${j.plate} "${j.name}" $opts${j.error != null ? ' error="${j.error}"' : ''}\n';
+      f.writeAsStringSync(line, mode: FileMode.append, flush: true);
+      // keep it small: the newest 200 lines
+      if (f.lengthSync() > 64 * 1024) {
+        final lines = f.readAsLinesSync();
+        f.writeAsStringSync('${lines.skip(lines.length - 200).join('\n')}\n');
+      }
+    } catch (_) {}
   }
 
   static String? _resultError(String jobDir) {
@@ -778,6 +831,7 @@ class SliceJob {
   final int plate;
   SliceJob({required this.name, required this.printerId, required this.dir, this.plate = 1});
   bool get running => state == 'slicing';
+  int get seconds => (finished ?? DateTime.now()).difference(started).inSeconds;
 
   void onLine(String line) {
     const tag = '[[SLICER_EVENT]]';
@@ -835,7 +889,7 @@ class SliceJob {
         'error': error,
         'warnings': warnings,
         'stats': stats,
-        'seconds': (finished ?? DateTime.now()).difference(started).inSeconds,
+        'seconds': seconds,
         'hasProject': project != null,
         if (mem != null) 'mem': mem,
       };

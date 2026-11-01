@@ -70,6 +70,11 @@ def diag():
         out["swaps"] = open("/proc/swaps").read().splitlines()
     except OSError:
         pass
+    # the bridge's own slice history (on the SD card, so it survives a power cut)
+    try:
+        out["slices"] = open("/var/lib/ffbridge/slicer/history.log").read().splitlines()[-40:]
+    except OSError:
+        out["slices"] = []
     return out
 
 
