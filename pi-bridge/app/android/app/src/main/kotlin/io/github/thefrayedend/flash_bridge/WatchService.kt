@@ -17,7 +17,8 @@ import java.net.URL
 /**
  * Watches the board while the app is closed: the print's progress in a quiet notification (like the
  * Bambu Handy app), and alerts when a print finishes, pauses (also when the AI pauses it), fails or is
- * cancelled, and when a slice is done or fails. It reads the same /api/status and /api/slicer the web
+ * cancelled, when a print fails to start, and when a slice is done or fails. Between "Start print" and printing
+ * the progress line shows the start stages (sending the file %, unpacking, starting; see StartStage). It reads the same /api/status and /api/slicer the web
  * page uses, every 10 s while something runs and every 30 s otherwise.
  */
 class WatchService : Service() {
@@ -47,6 +48,7 @@ class WatchService : Service() {
     private val aiPaused = HashMap<String, Boolean>()
     private val errorCode = HashMap<String, String>()
     private val sliceState = HashMap<String, String>()
+    private val printErrorAt = HashMap<String, String>()
     private var nextAlertId = 100
     private var offlineSince = 0L
     private var offlineAlerted = false
@@ -161,6 +163,17 @@ class WatchService : Service() {
                 if (!first && pausedByAi && aiPaused[id] != true && prev == "paused" && state == "paused") {
                     alert("$name: the AI paused the print", "It saw what looks like a failure. Check the camera.", "printer")
                 }
+                // a print that failed after the board had already answered (big files keep sending in the
+                // background); "at" tells a new failure from one already seen. Errors from before the app was
+                // watching are not announced (same as the web page).
+                val pe = p.optJSONObject("printError")
+                if (pe != null) {
+                    val at = pe.optString("at")
+                    if (!first && at != (printErrorAt[id] ?: "")) {
+                        alert("$name: the print did not start", pe.optString("message").ifEmpty { "The printer refused the file." }, "printer")
+                    }
+                    printErrorAt[id] = at
+                }
                 jobState[id] = state
                 aiPaused[id] = pausedByAi
                 errorCode[id] = code
@@ -178,6 +191,20 @@ class WatchService : Service() {
                             if (left > 0 && state == "printing") "${time(left)} left" else null,
                         ).joinToString(" · ")
                         progress = pct
+                    }
+                }
+                // from Start print until the printer says printing: sending → unpacking → starting
+                val starting = p.optJSONObject("starting")
+                val stage = StartStage.line(
+                    name, state, p.optString("machineState"), p.optString("uploadStatus"),
+                    starting?.optString("file"), starting?.optString("at"), System.currentTimeMillis(),
+                )
+                if (stage != null) {
+                    busy = true
+                    if (line == null) {
+                        title = stage.title
+                        line = stage.text
+                        progress = stage.progress
                     }
                 }
             }
@@ -266,7 +293,9 @@ class WatchService : Service() {
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setContentIntent(openApp("printer", 1))
-        if (progress != null) b.setProgress(100, progress, false)
+        if (progress != null) {
+            if (progress < 0) b.setProgress(0, 0, true) else b.setProgress(100, progress, false) // -1: moving bar
+        }
         return b.build()
     }
 

@@ -9,8 +9,9 @@ What it does:
 - **Models** tab: a browser for MakerWorld, Printables, Thingiverse, Thangs. Tapping Download on a model sends it
   to the board's slicer (ZIPs: every model inside); sliced files (G-code) go to the printer.
 - **Open with / Share**: 3MF, STL, OBJ, ZIP and G-code from any app; a shared model-page link opens in Models.
-- **Notifications** (Settings): the running print or slice in the notification bar with a progress bar; alerts
-  when a print finishes, pauses (also by the AI failure detection), fails, or the board goes quiet mid-print;
+- **Notifications** (Settings): the running print or slice in the notification bar with a progress bar (after
+  Start print: sending the file %, unpacking, starting); alerts when a print finishes, pauses (also by the AI
+  failure detection), fails, fails to start (the printer refused the file), or the board goes quiet mid-print;
   and when a slice is done or fails. Runs as a foreground service; starts again after a phone restart.
 - Finds the board on the Wi-Fi by itself (mDNS: the board announces "FlashForge Bridge on <name>").
 
