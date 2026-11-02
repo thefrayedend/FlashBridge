@@ -77,22 +77,38 @@ Future<void> main() async {
   check('meters', (st['meters'] as List)[1] == 2.5, st);
   check('layers / changes', st['layers'] == 42 && st['changes'] == 12, st);
 
-  // --- packing the sliced project like OrcaSlicer's send (G-code with thumbnail, md5, pictures)
+  // --- packing the sliced project like OrcaSlicer's send (G-code with thumbnail, md5, pictures, Orca's metadata)
   final z = File('${dir.path}/p.gcode.3mf');
-  final py = await Process.run('python3', ['-c', 'import zipfile,sys;z=zipfile.ZipFile(sys.argv[1],"w",zipfile.ZIP_DEFLATED);z.writestr("[Content_Types].xml","<Types/>");z.writestr("Metadata/plate_1.gcode","G1\\n"*500);z.writestr("Metadata/plate_1.gcode.md5","OLD");z.writestr("Metadata/slice_info.config","<config/>");z.writestr("_rels/.rels","<Relationships/>");z.close()', z.path]);
+  const mk = 'import zipfile,sys,json;z=zipfile.ZipFile(sys.argv[1],"w",zipfile.ZIP_DEFLATED)\n'
+      'z.writestr("[Content_Types].xml","<Types>\\n <Default Extension=\\"png\\" ContentType=\\"image/png\\"/>\\n</Types>")\n'
+      'z.writestr("Metadata/plate_1.gcode","G1\\n"*500);z.writestr("Metadata/plate_1.gcode.md5","OLD")\n'
+      'z.writestr("Metadata/slice_info.config","<config>\\n  <plate>\\n    <metadata key=\\"extruder_type\\" value=\\"0 0 0 0\\"/>\\n    <metadata key=\\"nozzle_volume_type\\" value=\\"0\\"/>\\n    <metadata key=\\"nozzle_diameters\\" value=\\"0.4,0.4,0.4,0.4\\"/>\\n    <metadata key=\\"first_layer_time\\" value=\\"\\"/>\\n    <metadata key=\\"filament_maps\\" value=\\"1 2 3 4\\"/>\\n    <metadata key=\\"limit_filament_maps\\" value=\\"4 0 0 0\\"/>\\n    <filament id=\\"1\\" type=\\"PLA\\"/>\\n    <filament id=\\"2\\" type=\\"PLA\\"/>\\n    <nozzle id=\\"0\\" extruder_id=\\"1\\" nozzle_diameter=\\"0.4\\" volume_type=\\"Standard\\"/>\\n    <layer_filament_lists>\\n    </layer_filament_lists>\\n  </plate>\\n</config>")\n'
+      'z.writestr("Metadata/model_settings.config","<config>\\n  <plate>\\n    <metadata key=\\"plater_id\\" value=\\"1\\"/>\\n    <metadata key=\\"locked\\" value=\\"false\\"/>\\n    <metadata key=\\"gcode_file\\" value=\\"Metadata/plate_1.gcode\\"/>\\n  </plate>\\n</config>")\n'
+      'z.writestr("Metadata/project_settings.config",json.dumps({"host_type":"octoprint","print_host":"","printhost_apikey":"","nozzle_diameter":["0.4","0.4","0.4","0.4"],"nozzle_volume_type":["Standard"],"filament_map_mode":"Auto For Flush"},indent="\\t"))\n'
+      'z.writestr("_rels/.rels","<Relationships/>");z.close()';
+  final py = await Process.run('python3', ['-c', mk, z.path]);
   if (py.exitCode == 0) {
     final packed = File('${dir.path}/packed.gcode.3mf');
-    await packPrinterProject(z, out, packed, png: png, small: png);
-    const verify = 'import zipfile,sys,hashlib\n'
+    await packPrinterProject(z, out, packed, png: png, small: png, serial: 'SN123');
+    const verify = 'import zipfile,sys,hashlib,json,re\n'
         'z=zipfile.ZipFile(sys.argv[1]); assert z.testzip() is None\n'
         'g=z.read("Metadata/plate_1.gcode"); assert g==open(sys.argv[2],"rb").read(), "gcode differs"\n'
         'assert z.read("Metadata/plate_1.gcode.md5").decode()==hashlib.md5(g).hexdigest().upper(), "md5"\n'
-        'assert z.read("Metadata/plate_1.png")[:4]==b"\\x89PNG" and z.read("Metadata/plate_1_small.png")[:4]==b"\\x89PNG"\n'
-        'assert z.read("Metadata/slice_info.config")==b"<config/>" and z.read("[Content_Types].xml")==b"<Types/>"\n'
+        'for p in ("plate_1","plate_1_small","plate_no_light_1","top_1","pick_1"): assert z.read("Metadata/%s.png"%p)[:4]==b"\\x89PNG", p\n'
         'n=z.namelist(); assert n.index("Metadata/plate_1.gcode")<n.index("Metadata/plate_1.gcode.md5")<n.index("Metadata/slice_info.config"), n\n'
-        'assert len(n)==7, n\n';
+        'assert len(n)==12, n\n'
+        'si=z.read("Metadata/slice_info.config").decode()\n'
+        'assert \'key="nozzle_volume_type" value="0 0 0 0"\' in si, si\n'
+        'assert re.search(r\'key="first_layer_time" value="[0-9.]+"\', si), si\n'
+        'assert \'<nozzle id="1" extruder_id="2"\' in si and si.count("<nozzle ")==2, si\n'
+        'assert \'key="limit_filament_maps" value="4 4 0 0"\' in si, si\n'
+        'ms=z.read("Metadata/model_settings.config").decode()\n'
+        'for k in ("filament_map_mode","filament_maps","filament_volume_maps","thumbnail_file","thumbnail_no_light_file","top_file","pick_file","pattern_bbox_file","gcode_file"): assert \'key="%s"\'%k in ms, (k, ms)\n'
+        'ps=json.loads(z.read("Metadata/project_settings.config"))\n'
+        'assert ps["host_type"]=="flashforge" and ps["flashforge_serial_number"]=="SN123" and "print_host" not in ps and ps["nozzle_volume_type"]==["Standard"]*4, ps\n'
+        'ct=z.read("[Content_Types].xml").decode(); assert \'Extension="json"\' in ct and \'Extension="jpg"\' in ct, ct\n';
     final t2 = await Process.run('python3', ['-c', verify, packed.path, out.path]);
-    check('packed project: G-code with thumbnail, md5, pictures, other entries kept, CRCs good', t2.exitCode == 0, t2.stderr);
+    check('packed project: G-code with thumbnail, md5, Orca pictures + metadata, other entries kept, CRCs good', t2.exitCode == 0, t2.stderr);
     final ut = await Process.run('unzip', ['-tq', packed.path]);
     check('unzip -t accepts it', ut.exitCode == 0, ut.stdout);
     final zr = ZipReader.tryFile(packed.path);
@@ -102,6 +118,16 @@ Future<void> main() async {
   } else {
     stdout.writeln('skip zip checks (no python3)');
   }
+  // --- the G-code's closing config block, rewritten like Orca's Flashforge host profile
+  const cfg = 'G1 X1\n; CONFIG_BLOCK_START\n; host_type = octoprint\n; flashforge_serial_number = \n; nozzle_diameter = 0.4,0.4,0.4,0.4\n'
+      '; nozzle_volume_type = Standard\n; print_host = \n; printhost_apikey = \n; wipe = 1\n; CONFIG_BLOCK_END\n\n';
+  final fc = flashforgeConfigBlock(cfg, 'SN123');
+  check('config block: flashforge host + serial, no host lines, volume type per nozzle',
+      fc.contains('; host_type = flashforge\n') && fc.contains('; flashforge_serial_number = SN123\n') && !fc.contains('print_host') &&
+          !fc.contains('printhost_apikey') && fc.contains('; nozzle_volume_type = Standard,Standard,Standard,Standard\n') && fc.startsWith('G1 X1\n') && fc.contains('; wipe = 1\n'), fc);
+  final fl = File('${dir.path}/fl.gcode')..writeAsStringSync(';LAYER_CHANGE\nG1 X0 Y0 F6000\nG1 X100 Y0 E1\nG1 E-1 F1800\n;LAYER_CHANGE\nG1 X0 Y0 F60\n');
+  final secs = firstLayerSeconds(fl);
+  check('first layer time estimate', (secs - (1.0 + 1 / 30)).abs() < 0.01, secs);
   check('crc32', crc32(utf8.encode('123456789')) == 0xCBF43926);
 
   // --- engine events
