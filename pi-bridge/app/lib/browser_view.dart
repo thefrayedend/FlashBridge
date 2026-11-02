@@ -95,15 +95,19 @@ class BrowserViewState extends State<BrowserView> {
   }
 
   /// MakerWorld got to its "Download Bambu Handy" screen anyway ([from]: that address): back to the model
-  /// page it is about, with the hint where Download 3MF is.
+  /// page it is about, with the hint where Download 3MF is; without a model, just back (no hint).
   Future<void> _leaveHandyScreen(InAppWebViewController c, Uri from) async {
     final now = DateTime.now();
     final last = _caughtAt;
     if (last != null && now.difference(last) < const Duration(seconds: 4)) return; // second hand-off of the same tap
     _caughtAt = now;
     final target = MakerWorld.modelPageFor(from);
-    if (target != null) await c.loadUrl(urlRequest: URLRequest(url: WebUri(target)));
-    _snack(_arrowHint, long: true);
+    if (target != null) {
+      await c.loadUrl(urlRequest: URLRequest(url: WebUri(target)));
+      _snack(_arrowHint, long: true);
+    } else if (await c.canGoBack()) {
+      await c.goBack(); // not about a model (e.g. MakerWorld's app pop-up): just back to where it was
+    }
   }
 
   /// Every address change, also the ones a page makes itself without loading (those never reach _route).

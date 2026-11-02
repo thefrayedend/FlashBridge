@@ -4,7 +4,9 @@
 // the page's own download, which the app catches and opens in the board's slicer.
 // The arrow itself still works as before. If the menu or its entry can't be found (MakerWorld changed), the
 // app shows a hint pointing at the arrow. The page's own switch to its "Download Bambu Handy" screen
-// (/open-app) is stopped too.
+// (/open-app) is stopped too. Only that split button (and its menu entry) is caught; MakerWorld's
+// "Get the full app experience" pop-up is closed for the user (its Cancel is tapped), and every other button
+// works as the page made it.
 // Page structure (2026-11-02, phone layout): a split button <div><span class="primaryButton"><span>Open in
 // Bambu Handy</span></span><div class="icon-box">(arrow)</div></div>; the menu is a [role=tooltip] popper
 // ("Download 3MF", "Download STL/CAD Files"). MakerWorld puts the last action used on the big button, so after
@@ -59,27 +61,87 @@ const makerWorldHandyScript = r'''
       setTimeout(look, 100);
     })();
   }
-  window.addEventListener('click', function (e) {
-    if (passing) return;
-    for (var n = e.target, i = 0; n && n.nodeType === 1 && i < 6; n = n.parentElement, i++) {
-      if (n.classList && n.classList.contains('icon-box')) return; // the arrow: leave it alone
-      var s = (n.textContent || '').trim();
-      if (s.length > 60) break;
-      if (/Bambu Handy/i.test(s) && !/download/i.test(s)) {
-        e.preventDefault();
-        e.stopImmediatePropagation();
-        download3mf(n);
-        return;
+  var HANDY = /Bambu Handy/i;
+  // which tap is ours: the split button on a model page, or the Handy entry in its arrow menu. Every other
+  // "Bambu Handy" button is left alone (except the pop-up below).
+  function splitButton(t) {
+    // the tap may land on the text, the big button's padding or its frame: look a few levels up for the
+    // short element that holds both the main button and the arrow
+    for (var n = t, i = 0; n && n.nodeType === 1 && i < 5; n = n.parentElement, i++) {
+      if ((n.textContent || '').trim().length > 60) return null;
+      var main = n.matches('span.primaryButton') ? n : n.querySelector('span.primaryButton');
+      if (main && (main === n || n.querySelector('.icon-box'))) {
+        if (!HANDY.test(main.textContent || '')) return null;
+        var box = main.parentElement;
+        return box && box.querySelector('.icon-box') ? main : null;
       }
     }
+    return null;
+  }
+  function menuEntry(t) {
+    var menu = t.closest && t.closest('[role=tooltip]');
+    if (!menu) return null;
+    for (var n = t, i = 0; n && n !== menu && i < 4; n = n.parentElement, i++) {
+      var s = (n.textContent || '').trim();
+      if (s.length < 40 && HANDY.test(s)) return n;
+    }
+    return null;
+  }
+  // MakerWorld's "Get the full app experience" pop-up: a dialog with an "Open in Bambu Handy" button and a
+  // Cancel button. Its Handy button just closes it; the pop-up is closed by itself as soon as it shows.
+  function handyPopup(root) {
+    var dialogs = (root || document).querySelectorAll('[role=dialog]');
+    for (var d = 0; d < dialogs.length; d++) {
+      var buttons = dialogs[d].querySelectorAll('button');
+      var handy = null, other = null;
+      for (var b = 0; b < buttons.length; b++) {
+        if (HANDY.test(buttons[b].textContent || '')) handy = buttons[b]; else other = other || buttons[b];
+      }
+      if (handy && other && buttons.length === 2 && !dialogs[d].querySelector('span.primaryButton')) return { dialog: dialogs[d], handy: handy, cancel: other };
+    }
+    return null;
+  }
+  var closed = typeof WeakSet === 'function' ? new WeakSet() : null;
+  var queued = false;
+  function closePopup() {
+    queued = false;
+    var p = handyPopup();
+    if (!p || (closed && closed.has(p.dialog))) return;
+    if (closed) closed.add(p.dialog);
+    tap(p.cancel);
+  }
+  window.addEventListener('click', function (e) {
+    if (passing) return;
+    var t = e.target;
+    if (!t || t.nodeType !== 1) return;
+    if (t.closest('.icon-box')) return; // the arrow: leave it alone
+    var popup = handyPopup();
+    if (popup && popup.handy.contains(t)) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      tap(popup.cancel);
+      return;
+    }
+    var hit = splitButton(t) || menuEntry(t);
+    if (!hit) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    download3mf(hit);
   }, true);
+  function watch() {
+    closePopup();
+    new MutationObserver(function () {
+      if (!queued) { queued = true; setTimeout(closePopup, 50); }
+    }).observe(document.documentElement, { childList: true, subtree: true });
+  }
+  if (document.documentElement) watch(); else document.addEventListener('DOMContentLoaded', watch);
   // the page's own switch to the Handy screen
   ['pushState', 'replaceState'].forEach(function (k) {
     var orig = history[k];
     history[k] = function (state, title, url) {
       try {
         if (url != null && /\/open-app/.test(new URL(String(url), location.href).pathname)) {
-          tell(new URL(String(url), location.href).href);
+          if (mainButtons().length) tell(new URL(String(url), location.href).href); // a hint only on a model page
           return;
         }
       } catch (e) {}

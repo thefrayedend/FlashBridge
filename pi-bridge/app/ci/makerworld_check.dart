@@ -44,6 +44,8 @@ void main() {
   check('page script names the app handler', makerWorldHandyScript.contains("callHandler('flashBridgeHandy'"), true);
   check('page script reports the two answers the app knows',
       makerWorldHandyScript.contains("tell('download')") && makerWorldHandyScript.contains("tell('nomenu')"), true);
+  check('page script handles the app pop-up and only the split button',
+      makerWorldHandyScript.contains('handyPopup') && makerWorldHandyScript.contains("'.icon-box'"), true);
   // and is valid JavaScript (when node is there)
   final js = File('${Directory.systemTemp.path}/flashbridge-handy.js')..writeAsStringSync(makerWorldHandyScript);
   try {
