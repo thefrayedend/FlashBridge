@@ -292,6 +292,27 @@ $('#btn-fullscreen').addEventListener('click', () => {
   else if (c.requestFullscreen) c.requestFullscreen();
   else if (cam.webkitEnterFullscreen) cam.webkitEnterFullscreen();
 });
+// "Camera only": the camera fills the window below the top bar (job, filament, temperatures and
+// controls hidden; not the browser's full screen). Remembered per browser; the same button brings
+// everything back. style.css does the layout from the cam-only class on <html>.
+function setCamOnly(on, say = false) {
+  document.documentElement.classList.toggle('cam-only', on);
+  const b = $('#btn-cam-only');
+  b.title = on ? 'Show everything' : 'Camera only';
+  b.setAttribute('aria-label', b.title);
+  b.setAttribute('aria-pressed', on ? 'true' : 'false');
+  store.set('ffb-cam-only', on ? '1' : '0');
+  fitCamOnly();
+  if (say) toast(on ? 'Camera only. Tap the same button to show everything again.' : 'Showing everything again.');
+}
+// the top bar can be one or two rows (several printers): measure it so the camera uses the rest
+function fitCamOnly() {
+  if (!document.documentElement.classList.contains('cam-only')) return;
+  document.documentElement.style.setProperty('--topbar-h', $('.topbar').offsetHeight + 'px');
+}
+$('#btn-cam-only').addEventListener('click', () => setCamOnly(!document.documentElement.classList.contains('cam-only'), true));
+window.addEventListener('resize', fitCamOnly);
+setCamOnly(store.get('ffb-cam-only', '0') === '1');
 
 // ---------------------------------------------------------------- home
 const aiChips = {
@@ -311,8 +332,6 @@ function renderHome() {
   $('#state-chip').innerHTML = `<span class="dot ${k}"></span>${esc(label)}`;
   const ai = p.aiEnabled && aiChips[p.ai?.status];
   $('#ai-chip').innerHTML = ai ? `<span class="dot ${ai[0]}"></span>${esc(ai[1])}` : '';
-  $('#btn-light').classList.toggle('on', !!p.light);
-  $('#btn-light').classList.toggle('hidden', !p.online);
 
   // banners
   const pend = p.pending;
@@ -428,7 +447,6 @@ async function setAutoClear(el) {
   toast(r.ok ? (el.checked ? 'Auto clear platform is on.' : 'Auto clear platform is off.') : (r.message || 'Could not save'), !r.ok);
   refreshStatus();
 }
-$('#btn-light').addEventListener('click', () => { const p = current(); if (p) control({ action: 'light', on: !p.light }); });
 
 function renderSlots(p) {
   const card = $('#slots').closest('.card');

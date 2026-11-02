@@ -203,6 +203,18 @@ input[type=checkbox], input[type=radio] { width: auto; }
 .chip .dot { width: 7px; height: 7px; }
 .cam-btn { width: 40px; height: 40px; border-radius: 10px; border: 0; background: rgba(0, 0, 0, .55); color: #fff; display: grid; place-items: center; cursor: pointer; backdrop-filter: blur(6px); }
 .cam-btn.on { background: rgba(255, 196, 0, .9); color: #000; }
+/* "Camera only" (button on the camera, remembered per browser; app.js sets cam-only on <html> and
+   --topbar-h): the camera fills the window below the top bar, keeping the picture's shape (black bars
+   if needed); the job, filament, temperatures and controls are hidden. Banners (errors, AI, waiting
+   file) stay above the camera. Not the browser's full screen - that is the other button. */
+.cam-only #view-home.active { display: flex; flex-direction: column; height: calc(100vh - var(--topbar-h, 59px) - 32px); height: calc(100dvh - var(--topbar-h, 59px) - 32px); min-height: 200px; }
+.cam-only main { padding-bottom: 16px; }
+.cam-only .printer-view, .cam-only.lo-left .printer-view, .cam-only.lo-fit .printer-view { display: block; flex: 1; min-height: 0; }
+.cam-only .col-main { height: 100%; }
+.cam-only .camera, .cam-only.lo-fit.lo-below .camera { height: 100%; width: 100%; aspect-ratio: auto; margin: 0; }
+.cam-only .col-side, .cam-only #job { display: none; }
+.cam-only .ico-cam-only, .ico-show-all { display: none; }
+.cam-only .ico-show-all { display: block; }
 
 .job { display: grid; grid-template-columns: 88px minmax(0, 1fr) auto; gap: 14px; align-items: center; }
 .job-thumb { width: 88px; height: 88px; border-radius: 10px; background: var(--panel-2); object-fit: contain; }

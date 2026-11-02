@@ -19,6 +19,7 @@ setup page, Spoolman, Discord, and AI print-failure detection (Obico model, runs
 
 ## What's new
 
+- **"Camera only" button on the camera** (where the bulb was): tap it and the camera fills the window; tap again to show everything. The printer light is still in Controls.
 - **Phone app: after Start print the notification shows sending the file (with %), unpacking and starting,** and tells you if the printer refused the file.
 - **Phone app: on MakerWorld, "Open in Bambu Handy" now downloads the model's 3MF straight into the slicer** (one tap; the arrow menu next to it still works as before).
 - **Files sliced on the board are packed exactly like OrcaSlicer's:** the printer's serial number and Flashforge host setup inside the file (as Orca's Flashforge profile writes them), the three extra plate pictures, the metadata keys the printer looks up after unpacking, one nozzle entry per nozzle, and the first-layer time. Fixes "print file error" (E0166) for prints sliced on the board.
