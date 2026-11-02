@@ -278,6 +278,21 @@ class FlashForgeClient {
         return true;
       });
 
+  /// The file name as OrcaSlicer's Flashforge sender hands it to the printer
+  /// (Flashforge.cpp `sanitize_flashforge_filename`): only ASCII letters, digits, '.', '_' and '-';
+  /// everything else (spaces, brackets, '+', accents) becomes '_'. The printer unpacks the file
+  /// under this name; names with other characters end in "print file error".
+  static String printerFileName(String fileName) {
+    var base = fileName.split('/').last.split('\\').last;
+    if (base.isEmpty) base = 'print';
+    final sb = StringBuffer();
+    for (final c in utf8.encode(base)) {
+      final ok = (c >= 0x30 && c <= 0x39) || (c >= 0x41 && c <= 0x5A) || (c >= 0x61 && c <= 0x7A) || c == 0x2E || c == 0x5F || c == 0x2D;
+      sb.writeCharCode(ok ? c : 0x5F);
+    }
+    return sb.toString();
+  }
+
   /// Uploads a file with a raw socket so Expect: 100-continue is honoured exactly like
   /// FlashForge's own clients. [onProgress] receives bytes sent.
   Future<void> upload(File file, String fileName,
@@ -287,7 +302,7 @@ class FlashForgeClient {
       void Function(int sent, int total)? onProgress}) async {
     final size = await file.length();
     final boundary = '----ffbridge${DateTime.now().microsecondsSinceEpoch}';
-    final safeName = fileName.replaceAll('"', '');
+    final safeName = printerFileName(fileName);
     final pre = utf8.encode('--$boundary\r\nContent-Disposition: form-data; name="gcodeFile"; filename="$safeName"\r\n'
         'Content-Type: application/octet-stream\r\n\r\n');
     final post = utf8.encode('\r\n--$boundary--\r\n');

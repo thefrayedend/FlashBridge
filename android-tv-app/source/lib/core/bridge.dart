@@ -632,8 +632,9 @@ class PrinterBridge {
           _notify();
         }
       });
-      files.printerFiles[name] = DateTime.now().millisecondsSinceEpoch / 1000.0;
-      gcodeResponse('// Upload to printer complete: $name');
+      final sentAs = FlashForgeClient.printerFileName(name);
+      files.printerFiles[sentAs] = DateTime.now().millisecondsSinceEpoch / 1000.0;
+      gcodeResponse('// Upload to printer complete: $name${sentAs != name ? ' (stored on the printer as $sentAs)' : ''}');
     } finally {
       uploadStatus = '';
       _notify();
