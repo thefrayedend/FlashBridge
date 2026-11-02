@@ -1542,7 +1542,8 @@ Map<String, String> flashforgeMetadata(Map<String, String> texts, {String serial
     final n = extruderTypes > 0 ? extruderTypes : nozzles;
     final nv = (val(si, 'nozzle_volume_type') ?? '').trim();
     if (n > 1 && nv.isNotEmpty && !nv.contains(' ')) si = setVal(si, 'nozzle_volume_type', List.filled(n, nv).join(' '));
-    if ((val(si, 'first_layer_time') ?? '').isEmpty && firstLayerTime > 0) {
+    if ((val(si, 'first_layer_time') ?? '').isEmpty) {
+      // always a number, like Orca writes (the firmware may parse it)
       si = setVal(si, 'first_layer_time', firstLayerTime.toStringAsFixed(6));
     }
     filamentMaps = (val(si, 'filament_maps') ?? '').trim();
