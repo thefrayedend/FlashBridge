@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
 import 'board.dart';
+import 'makerworld.dart';
 import 'native.dart';
 
 class Site {
@@ -75,10 +76,17 @@ class BrowserViewState extends State<BrowserView> {
   // has the arrow next to the green button with "Download 3MF", a normal download this browser catches.
   // So browsing stays in the phone layout; when the Handy button is tapped, that one model page is shown
   // in the desktop layout (like Chrome's "Desktop site"), and leaving it goes back to the phone layout.
-  String? _desktopPage; // host + path of the model page shown in the desktop layout
+  String? _desktopPage; // the model page shown in the desktop layout (see _pageKey)
+  String? _lastModelPage; // the last MakerWorld model page seen, in case the Handy address lacks the model
+  DateTime? _caughtAt; // when the Handy button was last caught (it fires two hand-offs in a row)
+  DateTime? _ignoreOpenAppUntil; // going back past the Handy screen: don't catch it again
+
+  /// A MakerWorld model page is the same page whatever its name part, language or profile (MakerWorld
+  /// adds the name to a short address itself); other pages: host + path.
   static String _pageKey(String url) {
     final u = Uri.tryParse(url);
-    return u == null ? url : '${u.host}${u.path}';
+    if (u == null) return url;
+    return MakerWorld.pageKey(u) ?? '${u.host}${u.path}';
   }
 
   bool _wantsDesktop(String url) => _desktopPage != null && _pageKey(url) == _desktopPage;
@@ -117,16 +125,47 @@ class BrowserViewState extends State<BrowserView> {
   static const _desktopHint = 'This page is now in the desktop layout: tap the small arrow next to the green "Open in Bambu Studio" '
       'button and choose "Download 3MF". It opens here, in the slicer.';
 
-  /// The Handy button was tapped: show this model page in the desktop layout, where Download 3MF is.
-  Future<void> _showDownloadLayout(InAppWebViewController c) async {
-    final page = await c.getUrl();
-    if (page == null) {
+  /// The Handy button was tapped ([from]: the address it went to): open the model page in the desktop
+  /// layout, where Download 3MF is. The model comes from that address (MakerWorld has already switched the
+  /// page to its "Download Bambu Handy" screen by now, so the current address is no help), else from the
+  /// last model page seen.
+  Future<void> _showDownloadLayout(InAppWebViewController c, {Uri? from, String? link}) async {
+    final now = DateTime.now();
+    final ignore = _ignoreOpenAppUntil;
+    if (ignore != null && now.isBefore(ignore)) return;
+    final last = _caughtAt;
+    if (last != null && now.difference(last) < const Duration(seconds: 4)) return; // second hand-off of the same tap
+    _caughtAt = now;
+    final current = (await c.getUrl())?.toString();
+    final cu = current == null ? null : Uri.tryParse(current);
+    final target = (from == null ? null : MakerWorld.modelPageFor(from)) ??
+        (link == null ? null : MakerWorld.modelPageIn(link)) ??
+        (cu != null && MakerWorld.modelId(cu) != null ? current : null) ??
+        _lastModelPage;
+    if (target == null) {
       _snack(_bambuHint);
       return;
     }
-    _desktopPage = _pageKey(page.toString());
-    if (await _layoutFor(page.toString())) await c.loadUrl(urlRequest: URLRequest(url: page));
+    _desktopPage = _pageKey(target);
+    await _layoutFor(target);
+    await c.loadUrl(urlRequest: URLRequest(url: WebUri(target)));
     _snack(_desktopHint, long: true);
+  }
+
+  /// Every address change, also the ones a page makes itself without loading (those never reach _route):
+  /// catches MakerWorld's Handy screen, remembers model pages, and keeps the layout right after Back.
+  Future<void> _visited(InAppWebViewController c, WebUri? url) async {
+    if (url == null) return;
+    if (!_focus.hasFocus) _address.text = url.toString();
+    final u = Uri.tryParse(url.toString());
+    if (u == null) return;
+    if (MakerWorld.isOpenApp(u)) {
+      await _showDownloadLayout(c, from: u);
+      return;
+    }
+    if (MakerWorld.modelId(u) != null) _lastModelPage = url.toString();
+    // a page that switched itself to another page, or Back: reload it if it needs the other layout
+    if (await _layoutFor(url.toString())) await c.reload();
   }
 
   Future<NavigationActionPolicy> _route(InAppWebViewController c, NavigationAction action) async {
@@ -136,8 +175,8 @@ class BrowserViewState extends State<BrowserView> {
     if (s.isEmpty || s.startsWith('about:') || s.startsWith('blob:') || s.startsWith('data:')) return NavigationActionPolicy.ALLOW;
     if (s.startsWith('http://') || s.startsWith('https://')) {
       // MakerWorld's "Open in Bambu Handy" goes through makerworld.com/…/open-app/…
-      if (url!.host.endsWith('makerworld.com') && url.path.contains('/open-app')) {
-        if (main) await _showDownloadLayout(c);
+      if (MakerWorld.isOpenApp(url!)) {
+        if (main) await _showDownloadLayout(c, from: url);
         return NavigationActionPolicy.CANCEL;
       }
       if (main && await _layoutFor(s)) {
@@ -164,7 +203,7 @@ class BrowserViewState extends State<BrowserView> {
       if (_desktop) {
         _snack(_bambuHint);
       } else {
-        await _showDownloadLayout(c);
+        await _showDownloadLayout(c, link: decoded);
       }
     } else {
       _snack('That link is for another app. Flash Bridge keeps you here: look for a Download button on the page instead.');
@@ -176,12 +215,37 @@ class BrowserViewState extends State<BrowserView> {
   Future<bool> back() async {
     if (_home) return false;
     final c = _c;
-    if (c != null && await c.canGoBack()) {
-      await c.goBack();
-      return true;
+    if (c != null) {
+      // skip MakerWorld's "Download Bambu Handy" screen (going back to it would catch it again) and the
+      // phone-layout copy of the page we're on (the Handy button left it behind), so one Back leaves the model
+      final h = await c.getCopyBackForwardList();
+      final list = h?.list ?? const <WebHistoryItem>[];
+      final cur = h?.currentIndex ?? (list.length - 1);
+      final here = cur >= 0 && cur < list.length ? list[cur].url?.toString() : null;
+      final hereKey = here == null ? null : _pageKey(here);
+      var i = cur - 1;
+      while (i >= 0 && i < list.length) {
+        final s = list[i].url?.toString();
+        if (!_isOpenApp(list[i].url) && (s == null || hereKey == null || _pageKey(s) != hereKey || hereKey != _desktopPage)) break;
+        i--;
+      }
+      if (i >= 0 && i < list.length) {
+        if (i < cur - 1) _ignoreOpenAppUntil = DateTime.now().add(const Duration(seconds: 3));
+        await c.goBackOrForward(steps: i - cur);
+        return true;
+      }
+      if (list.isEmpty && await c.canGoBack()) {
+        await c.goBack();
+        return true;
+      }
     }
     setState(() => _home = true);
     return true;
+  }
+
+  static bool _isOpenApp(WebUri? u) {
+    final p = u == null ? null : Uri.tryParse(u.toString());
+    return p != null && MakerWorld.isOpenApp(p);
   }
 
   void _go(String text) {
@@ -322,9 +386,7 @@ class BrowserViewState extends State<BrowserView> {
             }),
             onLoadStop: (c, url) => setState(() => _loading = false),
             onProgressChanged: (c, p) => setState(() => _progress = p / 100),
-            onUpdateVisitedHistory: (c, url, reload) {
-              if (url != null && !_focus.hasFocus) _address.text = url.toString();
-            },
+            onUpdateVisitedHistory: (c, url, reload) => _visited(c, url),
             onDownloadStartRequest: (c, req) => _download(req),
             // links for other apps (Bambu Handy / Studio …) are caught here, never handed over
             shouldOverrideUrlLoading: _route,
