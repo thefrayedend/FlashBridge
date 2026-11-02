@@ -1,0 +1,89 @@
+# FlashBridge - builds the ready-to-flash SD card image for a Raspberry Pi 4 (arm64).
+#
+# How to use: Actions -> "Build SD card image (Raspberry Pi 4)" -> Run workflow.
+# The base is the current official Raspberry Pi OS Lite (64-bit), downloaded here.
+# The finished image appears under Releases -> "Latest SD card image (Raspberry Pi 4)".
+# The image updates itself from the release "latest-image-pi4" (one click, like the Orange Pi image).
+name: Build SD card image (Raspberry Pi 4)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 150
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get Raspberry Pi OS Lite (64-bit)
+        run: |
+          mkdir -p base
+          curl -fsSL --retry 3 -o base/raspios-lite-arm64.img.xz https://downloads.raspberrypi.com/raspios_lite_arm64_latest
+          ls -lh base
+          echo "BASE_FILE=base/raspios-lite-arm64.img.xz" >> "$GITHUB_ENV"
+
+      - name: Get the 3D libraries for the slicer page (pinned, checksum-checked)
+        run: bash pi-bridge/slicer/fetch-web-vendor.sh
+
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+
+      - name: Compile the bridge
+        working-directory: pi-bridge/bridge
+        run: |
+          dart pub get
+          dart run test/prediction_check.dart
+          dart run test/mapping_check.dart
+          dart run test/errors_check.dart
+          dart run test/backup_check.dart
+          dart run test/finder_check.dart
+          dart run test/slicer_check.dart
+          dart run test/updater_check.dart
+          python3 ../image/test/wifi_status_check.py
+          python3 ../image/test/update_check.py
+          python3 ../image/test/printernet_check.py
+          dart compile exe bin/pibridge.dart -o "$GITHUB_WORKSPACE/pibridge" \
+            -DFFB_VERSION="1.0.${{ github.run_number }}" -DFFB_REPO="${{ github.repository }}" -DFFB_BOARD="raspberrypi-4"
+
+      - name: Install image tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends fdisk dosfstools mtools e2fsprogs xz-utils rsync python3 curl p7zip-full util-linux patchelf
+
+      - name: Build the slicer engine pack (downloaded by the board when the slicer is switched on)
+        run: |
+          bash pi-bridge/slicer/make-slicer-pack.sh --out "$GITHUB_WORKSPACE/slicer"
+          bash pi-bridge/slicer/test-slicer-pack.sh "$GITHUB_WORKSPACE/slicer"
+          ls -lh slicer
+
+      - name: Download the AI model
+        run: bash pi-bridge/ai/fetch-model.sh pi-bridge/ai/model/model-weights.onnx
+
+      - name: Build the SD card image
+        run: |
+          sudo bash pi-bridge/image/build-image.sh \
+            --base "$BASE_FILE" \
+            --bridge-bin "$GITHUB_WORKSPACE/pibridge" \
+            --model pi-bridge/ai/model/model-weights.onnx \
+            --name ffbridge-raspberrypi-4 \
+            --out "$GITHUB_WORKSPACE/out"
+          ls -lh out
+
+      - name: Build the one-click update package
+        run: |
+          bash pi-bridge/image/make-update.sh --bridge-bin "$GITHUB_WORKSPACE/pibridge" \
+            --version "1.0.${{ github.run_number }}" --board raspberrypi-4 --out "$GITHUB_WORKSPACE/update"
+          ls -lh update
+
+      - name: Publish it as the "Latest SD card image (Raspberry Pi 4)" release
+        run: |
+          gh release delete latest-image-pi4 --yes --cleanup-tag --repo "$GITHUB_REPOSITORY" || true
+          gh release create latest-image-pi4 out/* update/* slicer/* --repo "$GITHUB_REPOSITORY" \
+            --title "Latest SD card image (Raspberry Pi 4)" --notes-file pi-bridge/RELEASE-NOTES.md

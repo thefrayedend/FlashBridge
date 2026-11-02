@@ -20,6 +20,10 @@ const piBridgeVersion = String.fromEnvironment('FFB_VERSION', defaultValue: 'dev
 /// GitHub repository the update packages come from (-DFFB_REPO=owner/name); empty = no updates.
 const updateRepo = String.fromEnvironment('FFB_REPO', defaultValue: '');
 
+/// The board this build is for (-DFFB_BOARD): "orangepi-zero4" (the standard image) or "raspberrypi-4".
+/// Each board has its own release of update packages, so a board never installs another board's files.
+const updateBoard = String.fromEnvironment('FFB_BOARD', defaultValue: 'orangepi-zero4');
+
 class SetupServer {
   final BridgeHost host;
   final PiConfig pi;

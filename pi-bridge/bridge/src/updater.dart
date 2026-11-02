@@ -5,7 +5,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'core.dart';
-import 'setup_server.dart' show piBridgeVersion, updateRepo;
+import 'setup_server.dart' show piBridgeVersion, updateRepo, updateBoard;
 import 'system_control.dart';
 
 class Updater {
@@ -19,7 +19,10 @@ class Updater {
   String checkError = '';
   Timer? _timer;
 
-  String get baseUrl => 'https://github.com/$updateRepo/releases/download/latest-image';
+  /// The release that holds this board's packages: "latest-image" for the Orange Pi Zero 4 (the original
+  /// name, kept so boards in the field keep updating), "latest-image-pi4" for the Raspberry Pi 4.
+  static String releaseTag(String board) => board == 'orangepi-zero4' ? 'latest-image' : 'latest-image-${board.replaceAll('raspberrypi-', 'pi')}';
+  String get baseUrl => 'https://github.com/$updateRepo/releases/download/${releaseTag(updateBoard)}';
   bool get configured => updateRepo.isNotEmpty;
 
   /// "1.0.12" > "1.0.9"; anything vs "dev" -> false (local builds never update themselves).
@@ -42,7 +45,14 @@ class Updater {
     }
   }
 
-  bool get available => latest != null && isNewer('${latest!['version']}', piBridgeVersion);
+  /// A package made for another board is never offered (its "board" field, when present, must match).
+  static bool forThisBoard(Map<String, dynamic>? pkg, [String board = updateBoard]) {
+    final b = '${pkg?['board'] ?? ''}';
+    return b.isEmpty || b == board;
+  }
+
+  bool get available => latest != null && forThisBoard(latest) && isNewer('${latest!['version']}', piBridgeVersion);
+  bool get wrongBoard => latest != null && !forThisBoard(latest);
   bool get imageRequired {
     final want = '${latest?['imageHash'] ?? ''}', have = _imageHash;
     return available && want.isNotEmpty && have.isNotEmpty && want != have;
@@ -78,7 +88,7 @@ class Updater {
       }
       if (res.statusCode != 200) throw HttpException('GitHub answered ${res.statusCode}');
       latest = jsonDecode(await utf8.decodeStream(res)) as Map<String, dynamic>;
-      checkError = '';
+      checkError = wrongBoard ? 'The published update is for another board (${latest!['board']}); this board is $updateBoard.' : '';
       if (available) log.info('Update available: ${latest!['version']} (running $piBridgeVersion)');
     } catch (e) {
       checkError = 'Could not reach GitHub to check for updates ($e).';
