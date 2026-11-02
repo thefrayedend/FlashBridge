@@ -2,6 +2,7 @@
 import 'dart:io';
 
 import '../lib/makerworld.dart';
+import '../lib/makerworld_script.dart';
 
 var failed = 0;
 void check(String what, Object? got, Object? want) {
@@ -39,6 +40,21 @@ void main() {
       MakerWorld.pageKey(Uri.parse(MakerWorld.modelPageFor(step1)!)), MakerWorld.pageKey(page));
   check('no key for other pages', MakerWorld.pageKey(Uri.parse('https://makerworld.com/en')), null);
   check('www host', MakerWorld.modelId(Uri.parse('https://www.makerworld.com/en/models/7-x')), '7');
+
+  // Jon's address from the phone (0.1.4, 2026-11-02)
+  check("Jon's Handy screen → model page",
+      MakerWorld.modelPageFor(Uri.parse('https://makerworld.com/en/open-app?toPath=%2Fdesign%2Fmodel%2Fdetail%3Fdesign_id%3D3427154%26instance_id%3D3906475&from=Model')),
+      'https://makerworld.com/en/models/3427154#profileId-3906475');
+  // the page script calls the handler the app registers
+  check('page script names the app handler', makerWorldHandyScript.contains("callHandler('flashBridgeHandy'"), true);
+  // and is valid JavaScript (when node is there)
+  final js = File('${Directory.systemTemp.path}/flashbridge-handy.js')..writeAsStringSync(makerWorldHandyScript);
+  try {
+    final r = Process.runSync('node', ['--check', js.path]);
+    check('page script is valid JavaScript', r.exitCode, 0);
+  } on ProcessException {
+    print('skip page script syntax (no node)');
+  }
 
   if (failed > 0) {
     print('$failed check(s) failed');

@@ -1,6 +1,7 @@
 // A small web browser for model sites (MakerWorld, Printables, Thingiverse …). Downloads of models are
 // caught and opened in the board's slicer; sliced files go to the printer. Logins are the sites' own,
 // kept by the phone's web view like in any browser.
+import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
 
@@ -9,6 +10,7 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
 import 'board.dart';
 import 'makerworld.dart';
+import 'makerworld_script.dart';
 import 'native.dart';
 
 class Site {
@@ -129,7 +131,7 @@ class BrowserViewState extends State<BrowserView> {
   /// layout, where Download 3MF is. The model comes from that address (MakerWorld has already switched the
   /// page to its "Download Bambu Handy" screen by now, so the current address is no help), else from the
   /// last model page seen.
-  Future<void> _showDownloadLayout(InAppWebViewController c, {Uri? from, String? link}) async {
+  Future<void> _showDownloadLayout(InAppWebViewController c, {Uri? from, String? link, String? page}) async {
     final now = DateTime.now();
     final ignore = _ignoreOpenAppUntil;
     if (ignore != null && now.isBefore(ignore)) return;
@@ -138,8 +140,10 @@ class BrowserViewState extends State<BrowserView> {
     _caughtAt = now;
     final current = (await c.getUrl())?.toString();
     final cu = current == null ? null : Uri.tryParse(current);
+    final pu = page == null ? null : Uri.tryParse(page);
     final target = (from == null ? null : MakerWorld.modelPageFor(from)) ??
         (link == null ? null : MakerWorld.modelPageIn(link)) ??
+        (pu != null && MakerWorld.modelId(pu) != null ? page : null) ??
         (cu != null && MakerWorld.modelId(cu) != null ? current : null) ??
         _lastModelPage;
     if (target == null) {
@@ -150,6 +154,15 @@ class BrowserViewState extends State<BrowserView> {
     await _layoutFor(target);
     await c.loadUrl(urlRequest: URLRequest(url: WebUri(target)));
     _snack(_desktopHint, long: true);
+  }
+
+  /// The page script (makerworld_script.dart) caught the Handy button: [args] = [the /open-app address the
+  /// page tried to switch to, or ''; the page's own address].
+  Object? _handyFromPage(InAppWebViewController c, List<dynamic> args) {
+    final to = args.isNotEmpty ? '${args[0]}' : '';
+    final page = args.length > 1 ? '${args[1]}' : null;
+    _showDownloadLayout(c, from: to.isEmpty ? null : Uri.tryParse(to), page: page);
+    return null;
   }
 
   /// Every address change, also the ones a page makes itself without loading (those never reach _route):
@@ -374,8 +387,13 @@ class BrowserViewState extends State<BrowserView> {
               mediaPlaybackRequiresUserGesture: true,
               thirdPartyCookiesEnabled: true,
             ),
+            // catches MakerWorld's "Open in Bambu Handy" tap inside the page (see makerworld_script.dart)
+            initialUserScripts: UnmodifiableListView<UserScript>([
+              UserScript(source: makerWorldHandyScript, injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START),
+            ]),
             onWebViewCreated: (c) {
               _c = c;
+              c.addJavaScriptHandler(handlerName: 'flashBridgeHandy', callback: (args) => _handyFromPage(c, args));
               final u = _pendingUrl;
               _pendingUrl = null;
               if (u != null) _layoutFor(u).then((_) => c.loadUrl(urlRequest: URLRequest(url: WebUri(u))));
@@ -384,7 +402,12 @@ class BrowserViewState extends State<BrowserView> {
               _loading = true;
               if (url != null && !_focus.hasFocus) _address.text = url.toString();
             }),
-            onLoadStop: (c, url) => setState(() => _loading = false),
+            onLoadStop: (c, url) {
+              setState(() => _loading = false);
+              // last resort: MakerWorld's Handy screen got loaded anyway → open the model page instead
+              final u = url == null ? null : Uri.tryParse(url.toString());
+              if (u != null && MakerWorld.isOpenApp(u)) _showDownloadLayout(c, from: u);
+            },
             onProgressChanged: (c, p) => setState(() => _progress = p / 100),
             onUpdateVisitedHistory: (c, url, reload) => _visited(c, url),
             onDownloadStartRequest: (c, req) => _download(req),
