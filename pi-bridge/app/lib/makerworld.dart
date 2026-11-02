@@ -7,24 +7,14 @@
 //   2. then it loads makerworld.com/open-app/with-android?path=bambulab://bbl/design/model/detail?design_id=…
 // Both carry the model's number (design_id) and the print profile (instance_id), so the model page can be
 // opened straight from them: makerworld.com/en/models/3272331#profileId-3710672 (MakerWorld adds the name).
+// The app's page script (makerworld_script.dart) normally stops the tap before any of this; these are the
+// fallback when the Handy screen is reached anyway.
 
 class MakerWorld {
   static bool isSite(Uri u) => u.host == 'makerworld.com' || u.host.endsWith('.makerworld.com');
 
   /// The Handy hand-off screen or redirect (step 1 or 2 above).
   static bool isOpenApp(Uri u) => isSite(u) && u.path.contains('/open-app');
-
-  /// A model page: /en/models/3272331-midnight-majesty-black-jaguar (any language, with or without the name).
-  static String? modelId(Uri u) {
-    if (!isSite(u)) return null;
-    return RegExp(r'/models/(\d+)').firstMatch(u.path)?.group(1);
-  }
-
-  /// The same page whatever its name part, language, query or #profile: "makerworld/models/3272331".
-  static String? pageKey(Uri u) {
-    final id = modelId(u);
-    return id == null ? null : 'makerworld/models/$id';
-  }
 
   /// The model page an open-app address is about, or null.
   static String? modelPageFor(Uri u) {

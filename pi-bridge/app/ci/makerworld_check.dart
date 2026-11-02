@@ -34,12 +34,7 @@ void main() {
       'https://makerworld.com/en/models/3272331#profileId-3710672');
   check('link without a model', MakerWorld.modelPageIn('bambulab://bbl/home'), null);
 
-  check('page key ignores name, language, profile',
-      MakerWorld.pageKey(page), MakerWorld.pageKey(Uri.parse('https://makerworld.com/de/models/3272331?from=recommend')));
-  check('page key of the short address = the full one',
-      MakerWorld.pageKey(Uri.parse(MakerWorld.modelPageFor(step1)!)), MakerWorld.pageKey(page));
-  check('no key for other pages', MakerWorld.pageKey(Uri.parse('https://makerworld.com/en')), null);
-  check('www host', MakerWorld.modelId(Uri.parse('https://www.makerworld.com/en/models/7-x')), '7');
+  check('www host', MakerWorld.isOpenApp(Uri.parse('https://www.makerworld.com/en/open-app?x=1')), true);
 
   // Jon's address from the phone (0.1.4, 2026-11-02)
   check("Jon's Handy screen → model page",
@@ -47,6 +42,8 @@ void main() {
       'https://makerworld.com/en/models/3427154#profileId-3906475');
   // the page script calls the handler the app registers
   check('page script names the app handler', makerWorldHandyScript.contains("callHandler('flashBridgeHandy'"), true);
+  check('page script reports the two answers the app knows',
+      makerWorldHandyScript.contains("tell('download')") && makerWorldHandyScript.contains("tell('nomenu')"), true);
   // and is valid JavaScript (when node is there)
   final js = File('${Directory.systemTemp.path}/flashbridge-handy.js')..writeAsStringSync(makerWorldHandyScript);
   try {
