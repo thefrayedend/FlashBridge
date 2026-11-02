@@ -14,6 +14,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'core.dart';
@@ -728,14 +729,16 @@ class Slicer {
         return;
       }
       final out = File('${j.dir}/preview.gcode');
-      await addThumbnail(g, out, thumb.gcode ?? thumb.plate);
+      // The printer's serial number goes into the file like OrcaSlicer's Flashforge host profile writes it.
+      final serial = host.config.printers.where((p) => p.id == j.printerId).firstOrNull?.serial ?? '';
+      await addThumbnail(g, out, thumb.gcode ?? thumb.plate, serial: serial);
       g.deleteSync();
       final proj = File('${j.dir}/out/plate.gcode.3mf');
       if (proj.existsSync()) {
         // repack like OrcaSlicer's send: the G-code with its thumbnail, its md5, the plate pictures
         final packed = File('${j.dir}/out/printer.gcode.3mf');
         try {
-          await packPrinterProject(proj, out, packed, png: thumb.plate, small: thumb.small);
+          await packPrinterProject(proj, out, packed, png: thumb.plate, small: thumb.small, serial: serial);
           packed.renameSync(proj.path);
         } catch (e) {
           host.log.warn('Could not pack the sliced project like OrcaSlicer: $e');
@@ -1129,13 +1132,17 @@ Uint8List? decodePngDataUrl(String s) {
 
 /// Copies [src] to [dst] with a PrusaSlicer-style thumbnail block after the header, so the
 /// file list, the print dialog and the printer show a picture of the plate.
-Future<void> addThumbnail(File src, File dst, Uint8List? png) async {
+Future<void> addThumbnail(File src, File dst, Uint8List? png, {String serial = ''}) async {
   // OrcaSlicer's Flashforge profiles start the file with the print time ("file_start_gcode"), which
   // the printer's firmware reads; the engine's older profiles lack it, so it is added here.
   final first = fileStartLine(src);
   final raf = await src.open();
   final head = await raf.read(65536);
   await raf.close();
+  final len = src.lengthSync();
+  // The closing "; CONFIG_BLOCK" is rewritten like a file from OrcaSlicer's Flashforge host profile
+  // (host_type flashforge, the printer's serial number, one nozzle volume type per extruder).
+  final tailAt = len > 500000 ? len - 500000 : head.length;
   final out = dst.openWrite();
   if (first != null && !latin1.decode(head.sublist(0, head.length < 200 ? head.length : 200)).startsWith('; estimated printing time')) {
     out.add(latin1.encode('$first\n'));
@@ -1160,8 +1167,39 @@ Future<void> addThumbnail(File src, File dst, Uint8List? png) async {
     out.add(latin1.encode(block.toString()));
     out.add(head.sublist(at));
   }
-  await out.addStream(src.openRead(head.length));
+  if (tailAt > head.length) await out.addStream(src.openRead(head.length, tailAt));
+  final tailRaf = await src.open();
+  await tailRaf.setPosition(tailAt);
+  final tail = await tailRaf.read(len - tailAt);
+  await tailRaf.close();
+  out.add(latin1.encode(flashforgeConfigBlock(latin1.decode(tail), serial)));
   await out.close();
+}
+
+/// Rewrites the G-code's closing config block (text from "; CONFIG_BLOCK_START" on, [tail] may start
+/// earlier) the way OrcaSlicer writes it for a Flashforge host profile: `host_type = flashforge`,
+/// the printer's serial number, no host address / key lines, and `nozzle_volume_type` once per extruder.
+String flashforgeConfigBlock(String tail, String serial) {
+  final at = tail.lastIndexOf('; CONFIG_BLOCK_START');
+  if (at < 0) return tail;
+  var cfg = tail.substring(at);
+  String? get(String key) => RegExp('^; ${RegExp.escape(key)} = (.*)\$', multiLine: true).firstMatch(cfg)?.group(1);
+  String set(String text, String key, String value) {
+    final re = RegExp('^; ${RegExp.escape(key)} = .*\$', multiLine: true);
+    return re.hasMatch(text) ? text.replaceFirst(re, '; $key = $value') : text;
+  }
+
+  cfg = set(cfg, 'host_type', 'flashforge');
+  if (serial.isNotEmpty) cfg = set(cfg, 'flashforge_serial_number', serial);
+  for (final k in ['print_host', 'print_host_webui', 'printhost_apikey', 'printhost_password', 'printhost_user', 'printhost_port', 'printhost_cafile']) {
+    cfg = cfg.replaceFirst(RegExp('^; ${RegExp.escape(k)} = .*\\n', multiLine: true), '');
+  }
+  final nozzles = (get('nozzle_diameter') ?? '').split(',').where((s) => s.trim().isNotEmpty).length;
+  final volume = get('nozzle_volume_type');
+  if (nozzles > 1 && volume != null && !volume.contains(',')) {
+    cfg = set(cfg, 'nozzle_volume_type', List.filled(nozzles, volume.trim()).join(','));
+  }
+  return tail.substring(0, at) + cfg;
 }
 
 /// "; estimated printing time (normal mode) = 2d 5h 4m 36s": OrcaSlicer's Flashforge file_start_gcode
@@ -1267,7 +1305,7 @@ int crc32(List<int> data) {
 /// kept as is, except Metadata/plate_1.gcode, which becomes [gcode] (the G-code with its thumbnail
 /// block), its .md5, and the plate pictures [png] (512x512) and [small] (128x128), which the engine
 /// lists in _rels/.rels but cannot draw. Native gzip / md5sum do the heavy lifting (300 MB files).
-Future<void> packPrinterProject(File engine3mf, File gcode, File out, {Uint8List? png, Uint8List? small}) async {
+Future<void> packPrinterProject(File engine3mf, File gcode, File out, {Uint8List? png, Uint8List? small, String serial = ''}) async {
   final src = engine3mf.openSync();
   final gz = File('${out.path}.gcode.gz');
   final dst = out.openSync(mode: FileMode.write);
@@ -1374,8 +1412,35 @@ Future<void> packPrinterProject(File engine3mf, File gcode, File out, {Uint8List
     }
 
     void addStored(String name, Uint8List data) => add(name, 0, crc32(data), data.length, data.length, () => dst.writeFromSync(data));
+    void addDeflated(String name, String text) {
+      final m = Uint8List.fromList(utf8.encode(text));
+      final c = ZLibCodec(raw: true).encode(m);
+      add(name, 8, crc32(m), c.length, m.length, () => dst.writeFromSync(c));
+    }
 
-    const skip = {'Metadata/plate_1.gcode', 'Metadata/plate_1.gcode.md5', 'Metadata/plate_1.png', 'Metadata/plate_1_small.png'};
+    int dataStart(_ZipEntry en) {
+      src.setPositionSync(en.offset);
+      final lh = ByteData.sublistView(src.readSync(30));
+      return en.offset + 30 + lh.getUint16(26, Endian.little) + lh.getUint16(28, Endian.little);
+    }
+
+    String readText(_ZipEntry en) {
+      src.setPositionSync(dataStart(en));
+      final raw = src.readSync(en.csize);
+      return utf8.decode(en.method == 8 ? ZLibCodec(raw: true).decode(raw) : raw, allowMalformed: true);
+    }
+
+    // Small metadata entries are rewritten to match what OrcaSlicer's "send to printer" writes
+    // (see flashforgeMetadata); the engine's own copies are dropped.
+    final texts = <String, String>{};
+    for (final en in entries) {
+      if (flashforgeMetadataNames.contains(en.name)) texts[en.name] = readText(en);
+    }
+    final firstLayer = firstLayerSeconds(gcode);
+    final rewritten = flashforgeMetadata(texts, serial: serial, firstLayerTime: firstLayer, pictures: png != null);
+
+    const skip = {'Metadata/plate_1.gcode', 'Metadata/plate_1.gcode.md5', 'Metadata/plate_1.png', 'Metadata/plate_1_small.png',
+      'Metadata/plate_no_light_1.png', 'Metadata/top_1.png', 'Metadata/pick_1.png'};
     for (final en in entries) {
       if (en.name == 'Metadata/plate_1.gcode') {
         add(en.name, 8, gcodeCrc, gzLen - 18, gcodeSize, () => copy(gzf, 10, gzLen - 18));
@@ -1385,12 +1450,22 @@ Future<void> packPrinterProject(File engine3mf, File gcode, File out, {Uint8List
         continue;
       }
       if (skip.contains(en.name)) continue;
-      src.setPositionSync(en.offset);
-      final lh = ByteData.sublistView(src.readSync(30));
-      final dataAt = en.offset + 30 + lh.getUint16(26, Endian.little) + lh.getUint16(28, Endian.little);
+      final text = rewritten[en.name];
+      if (text != null) {
+        addDeflated(en.name, text);
+        continue;
+      }
+      final dataAt = dataStart(en);
       add(en.name, en.method, en.crc, en.csize, en.usize, () => copy(src, dataAt, en.csize));
     }
-    if (png != null) addStored('Metadata/plate_1.png', png);
+    if (png != null) {
+      addStored('Metadata/plate_1.png', png);
+      // OrcaSlicer also ships the plate without lighting, a top view and a picking image; the engine
+      // cannot draw those (no OpenGL), so the plate picture stands in for all three.
+      addStored('Metadata/plate_no_light_1.png', png);
+      addStored('Metadata/top_1.png', png);
+      addStored('Metadata/pick_1.png', png);
+    }
     if (small != null) addStored('Metadata/plate_1_small.png', small);
     gzf.closeSync();
 
@@ -1408,6 +1483,182 @@ Future<void> packPrinterProject(File engine3mf, File gcode, File out, {Uint8List
     src.closeSync();
     dst.closeSync();
     if (gz.existsSync()) gz.deleteSync();
+  }
+}
+
+/// The small entries of the project that are rewritten to match OrcaSlicer's send (see [flashforgeMetadata]).
+const flashforgeMetadataNames = {
+  '[Content_Types].xml',
+  'Metadata/slice_info.config',
+  'Metadata/model_settings.config',
+  'Metadata/project_settings.config',
+};
+
+/// Rewrites the project's metadata the way OrcaSlicer 2.5 writes it for a Flashforge host profile,
+/// so the printer finds everything it looks for after unpacking (compared against a stock Orca file
+/// the Creator 5 Pro accepts, C:\FlashBridge\reference):
+/// - project_settings.config: `host_type` flashforge, the printer's serial number, no host address /
+///   key entries, `nozzle_volume_type` once per extruder;
+/// - slice_info.config: `nozzle_volume_type` once per extruder, `first_layer_time` filled, one
+///   `<nozzle>` per extruder the plate uses, `limit_filament_maps` per used extruder;
+/// - model_settings.config: the filament map keys and the picture / bbox file keys;
+/// - [Content_Types].xml: the jpg / jpeg / json defaults.
+/// Returns the entries that changed (name -> new text).
+Map<String, String> flashforgeMetadata(Map<String, String> texts, {String serial = '', double firstLayerTime = 0, bool pictures = true}) {
+  final out = <String, String>{};
+  String? val(String xml, String key) => RegExp('<metadata key="${RegExp.escape(key)}" value="([^"]*)"').firstMatch(xml)?.group(1);
+  String setVal(String xml, String key, String value) =>
+      xml.replaceFirst(RegExp('<metadata key="${RegExp.escape(key)}" value="[^"]*"'), '<metadata key="$key" value="$value"');
+
+  // ---- project_settings.config (JSON, tab-indented, keys sorted like the engine writes them)
+  final ps = texts['Metadata/project_settings.config'];
+  var nozzles = 1;
+  var mapMode = 'Auto For Flush';
+  if (ps != null) {
+    try {
+      final j = Map<String, dynamic>.from(jsonDecode(ps) as Map);
+      final nd = j['nozzle_diameter'];
+      if (nd is List && nd.isNotEmpty) nozzles = nd.length;
+      if (j['filament_map_mode'] is String && (j['filament_map_mode'] as String).isNotEmpty) mapMode = j['filament_map_mode'];
+      j['host_type'] = 'flashforge';
+      if (serial.isNotEmpty) j['flashforge_serial_number'] = serial;
+      for (final k in ['print_host', 'print_host_webui', 'printhost_apikey', 'printhost_password', 'printhost_user', 'printhost_port', 'printhost_cafile']) {
+        j.remove(k);
+      }
+      final nv = j['nozzle_volume_type'];
+      if (nozzles > 1 && nv is List && nv.length == 1) j['nozzle_volume_type'] = List.filled(nozzles, nv.first);
+      final sorted = Map.fromEntries(j.entries.toList()..sort((a, b) => a.key.compareTo(b.key)));
+      out['Metadata/project_settings.config'] = JsonEncoder.withIndent('\t').convert(sorted);
+    } catch (_) {
+      // leave the engine's copy alone
+    }
+  }
+
+  // ---- slice_info.config
+  var si = texts['Metadata/slice_info.config'];
+  var filamentMaps = '';
+  if (si != null) {
+    final extruderTypes = (val(si, 'extruder_type') ?? '').trim().split(RegExp(r'\s+')).where((s) => s.isNotEmpty).length;
+    final n = extruderTypes > 0 ? extruderTypes : nozzles;
+    final nv = (val(si, 'nozzle_volume_type') ?? '').trim();
+    if (n > 1 && nv.isNotEmpty && !nv.contains(' ')) si = setVal(si, 'nozzle_volume_type', List.filled(n, nv).join(' '));
+    if ((val(si, 'first_layer_time') ?? '').isEmpty && firstLayerTime > 0) {
+      si = setVal(si, 'first_layer_time', firstLayerTime.toStringAsFixed(6));
+    }
+    filamentMaps = (val(si, 'filament_maps') ?? '').trim();
+    final maps = filamentMaps.split(RegExp(r'\s+')).where((s) => s.isNotEmpty).map((s) => int.tryParse(s) ?? 1).toList();
+    final used = <int>{};
+    for (final m in RegExp(r'<filament id="(\d+)"').allMatches(si)) {
+      final id = int.parse(m.group(1)!);
+      used.add(id - 1 < maps.length ? maps[id - 1] : 1);
+    }
+    final usedList = used.toList()..sort();
+    final diameter = (val(si, 'nozzle_diameters') ?? '0.4').split(',').first.trim();
+    final nozzleLines = RegExp(r'^[ \t]*<nozzle [^\n]*\n', multiLine: true).allMatches(si).length;
+    if (usedList.isNotEmpty && nozzleLines < usedList.length) {
+      final block = StringBuffer();
+      for (var k = 0; k < usedList.length; k++) {
+        block.writeln('    <nozzle id="$k" extruder_id="${usedList[k]}" nozzle_diameter="$diameter" volume_type="Standard"/>');
+      }
+      // one <nozzle> per extruder the plate uses, where the engine put its single one
+      si = si.replaceAll(RegExp(r'^[ \t]*<nozzle [^\n]*\n', multiLine: true), '');
+      si = si.contains('    <layer_filament_lists>')
+          ? si.replaceFirst('    <layer_filament_lists>', '$block    <layer_filament_lists>')
+          : si.replaceFirst('  </plate>', '$block  </plate>');
+    }
+    final limit = (val(si, 'limit_filament_maps') ?? '').trim().split(RegExp(r'\s+')).where((s) => s.isNotEmpty).toList();
+    if (limit.isNotEmpty && usedList.isNotEmpty) {
+      final lim = [for (var e = 1; e <= limit.length; e++) used.contains(e) ? '4' : '0'];
+      si = setVal(si, 'limit_filament_maps', lim.join(' '));
+    }
+    if (si != texts['Metadata/slice_info.config']) out['Metadata/slice_info.config'] = si;
+  }
+
+  // ---- model_settings.config
+  final ms = texts['Metadata/model_settings.config'];
+  if (ms != null) {
+    var s = ms;
+    String line(String key, String value) => '    <metadata key="$key" value="$value"/>\n';
+    final mapsCount = filamentMaps.isEmpty ? nozzles : filamentMaps.split(RegExp(r'\s+')).where((x) => x.isNotEmpty).length;
+    final after = <String>[];
+    if (!s.contains('key="filament_map_mode"')) after.add(line('filament_map_mode', mapMode));
+    if (!s.contains('key="filament_maps"') && filamentMaps.isNotEmpty) after.add(line('filament_maps', filamentMaps));
+    if (!s.contains('key="filament_volume_maps"')) after.add(line('filament_volume_maps', List.filled(mapsCount, '0').join(' ')));
+    final locked = RegExp(r'^[ \t]*<metadata key="locked" value="[^"]*"/>\n', multiLine: true).firstMatch(s);
+    if (after.isNotEmpty && locked != null) s = s.substring(0, locked.end) + after.join() + s.substring(locked.end);
+    final files = <String>[];
+    if (pictures) {
+      if (!s.contains('key="thumbnail_file"')) files.add(line('thumbnail_file', 'Metadata/plate_1.png'));
+      if (!s.contains('key="thumbnail_no_light_file"')) files.add(line('thumbnail_no_light_file', 'Metadata/plate_no_light_1.png'));
+      if (!s.contains('key="top_file"')) files.add(line('top_file', 'Metadata/top_1.png'));
+      if (!s.contains('key="pick_file"')) files.add(line('pick_file', 'Metadata/pick_1.png'));
+    }
+    if (!s.contains('key="pattern_bbox_file"')) files.add(line('pattern_bbox_file', 'Metadata/plate_1.json'));
+    final gcodeLine = RegExp(r'^[ \t]*<metadata key="gcode_file" value="[^"]*"/>\n', multiLine: true).firstMatch(s);
+    if (files.isNotEmpty) {
+      if (gcodeLine != null) {
+        s = s.substring(0, gcodeLine.end) + files.join() + s.substring(gcodeLine.end);
+      } else {
+        s = s.replaceFirst('  </plate>', '${files.join()}  </plate>');
+      }
+    }
+    if (s != ms) out['Metadata/model_settings.config'] = s;
+  }
+
+  // ---- [Content_Types].xml
+  final ct = texts['[Content_Types].xml'];
+  if (ct != null && !ct.contains('Extension="json"')) {
+    final add = StringBuffer();
+    if (!ct.contains('Extension="jpg"')) add.write(' <Default Extension="jpg" ContentType="image/jpeg"/>\n');
+    if (!ct.contains('Extension="jpeg"')) add.write(' <Default Extension="jpeg" ContentType="image/jpeg"/>\n');
+    add.write(' <Default Extension="json" ContentType="application/json"/>\n');
+    final png = RegExp(r'^[ \t]*<Default Extension="png"[^\n]*\n', multiLine: true).firstMatch(ct);
+    out['[Content_Types].xml'] = png != null
+        ? ct.substring(0, png.end) + add.toString() + ct.substring(png.end)
+        : ct.replaceFirst('</Types>', '$add</Types>');
+  }
+  return out;
+}
+
+/// A rough first-layer time (seconds) from the G-code's moves up to the second layer change, for
+/// slice_info's `first_layer_time` (the lean engine leaves it empty).
+double firstLayerSeconds(File gcode) {
+  try {
+    final raf = gcode.openSync();
+    final len = gcode.lengthSync();
+    final text = latin1.decode(raf.readSync(len < 3000000 ? len : 3000000));
+    raf.closeSync();
+    final first = text.indexOf(';LAYER_CHANGE');
+    if (first < 0) return 0;
+    var second = text.indexOf(';LAYER_CHANGE', first + 13);
+    if (second < 0) second = text.length;
+    var x = 0.0, y = 0.0, z = 0.0, f = 1800.0, secs = 0.0;
+    final re = RegExp(r'^G[01]\s+([^;\n]*)', multiLine: true);
+    for (final m in re.allMatches(text.substring(first, second))) {
+      double? nx, ny, nz, ne;
+      for (final p in m.group(1)!.split(RegExp(r'\s+'))) {
+        if (p.isEmpty) continue;
+        final v = double.tryParse(p.substring(1));
+        if (v == null) continue;
+        switch (p[0]) {
+          case 'X': nx = v;
+          case 'Y': ny = v;
+          case 'Z': nz = v;
+          case 'E': ne = v;
+          case 'F': f = v;
+        }
+      }
+      final dx = (nx ?? x) - x, dy = (ny ?? y) - y, dz = (nz ?? z) - z;
+      var d = math.sqrt(dx * dx + dy * dy + dz * dz);
+      if (d == 0) d = (ne ?? 0).abs(); // Orca's G-code uses relative E (M83)
+      if (f > 0) secs += d / (f / 60);
+      x = nx ?? x;
+      y = ny ?? y;
+      z = nz ?? z;
+    }
+    return secs;
+  } catch (_) {
+    return 0;
   }
 }
 
