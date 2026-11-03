@@ -67,3 +67,4 @@ setup page, Spoolman, Discord, and AI print-failure detection (Obico model, runs
   - If memory still runs out, only the slicer is stopped and you get a clear message, never the bridge.
   - The slicer engine is ~25% smaller (debug data and unused libraries removed; same G-code).
 - The bridge is now called **Flash Bridge** (the address http://ffbridge.local stays the same).
+<!-- builder push test 2026-11-03 -->
