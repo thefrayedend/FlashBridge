@@ -199,6 +199,26 @@ mkdir -p "$MNT"
 mount "$ROOTDEV" "$MNT"
 mkdir -p "$MNT/ffsetup"   # mount point; the drive itself is filled with mtools below
 echo "  root filesystem: $(. "$MNT/etc/os-release" 2>/dev/null; echo "${PRETTY_NAME:-unknown}")"
+# >>> pi4-image
+# Raspberry Pi OS keeps its boot files (cmdline.txt, config.txt) on a FAT partition in front of
+# the root filesystem. Find it by content (the partition that holds cmdline.txt - never by number)
+# and mount it where the image expects it (/boot/firmware on Bookworm, /boot before), so
+# customize.sh can edit cmdline.txt. Images without such a partition (Orange Pi) are unaffected.
+BOARD="${NAME#ffbridge-}"                       # e.g. ffbridge-raspberrypi-4 -> raspberrypi-4
+BOOTDEV="" BOOTMNT=""
+for d in "$LOOP"p*; do
+  [ "$d" = "$ROOTDEV" ] || [ "$d" = "$SETUPDEV" ] && continue
+  [ "$(blkid -o value -s TYPE "$d" 2>/dev/null)" = vfat ] || continue
+  if MTOOLS_SKIP_CHECK=1 mdir -i "$d" ::/cmdline.txt >/dev/null 2>&1; then BOOTDEV="$d"; break; fi
+done
+if [ -n "$BOOTDEV" ]; then
+  BOOTMNT="$MNT/boot/firmware"; [ -d "$BOOTMNT" ] || BOOTMNT="$MNT/boot"
+  mount "$BOOTDEV" "$BOOTMNT"
+  echo "  boot files: $BOOTDEV mounted at ${BOOTMNT#"$MNT"}"
+fi
+cleanup_bootfiles() { set +e; [ -n "$BOOTMNT" ] && mountpoint -q "$BOOTMNT" && umount -l "$BOOTMNT"; return 0; }
+trap 'cleanup_bootfiles; cleanup' EXIT
+# <<< pi4-image
 
 # ----------------------------------------------------------------------------- payload
 say "Copying the bridge, setup page, Mainsail and AI files"
@@ -226,6 +246,10 @@ $BAD"
 git -C "$REPO" describe --always --dirty > "$MNT/opt/ffbridge/BUILD" 2>/dev/null || date -u +%Y%m%d > "$MNT/opt/ffbridge/BUILD"
 # Fingerprint of the parts only a new image can change (see image-hash.sh / one-click updates).
 bash "$HERE/image-hash.sh" > "$MNT/opt/ffbridge/IMAGE_HASH"
+# >>> pi4-image
+# Other boards: their fingerprint also covers the pi4-image lines (the Orange Pi's stays as it was).
+[ "$BOARD" = orangepi-zero4 ] || bash "$HERE/image-hash.sh" --board "$BOARD" > "$MNT/opt/ffbridge/IMAGE_HASH"
+# <<< pi4-image
 
 say "Filling the FFBRIDGE settings drive"
 mkdir -p "$WORK/setup"
@@ -272,6 +296,9 @@ fi
 
 say "Finishing"
 sync
+# >>> pi4-image
+[ -n "$BOOTMNT" ] && umount "$BOOTMNT"
+# <<< pi4-image
 umount "$MNT"
 e2fsck -f -y "$ROOTDEV" >/dev/null || [ $? -le 1 ] || die "final e2fsck failed"
 losetup -d "$LOOP"; LOOP=""

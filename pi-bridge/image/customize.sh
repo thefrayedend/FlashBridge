@@ -151,6 +151,35 @@ systemctl enable ffbridge-firstboot.service ffbridge-config.service ffbridge-hot
 if [ -f /etc/network/interfaces ]; then
   sed -i -E '/^\s*(auto|allow-hotplug)\s+wlan[0-9]+/d; /^\s*iface\s+wlan[0-9]+/,/^\s*$/d' /etc/network/interfaces || true
 fi
+# >>> pi4-image
+# ---------------------------------------------------------------- Raspberry Pi OS (Bookworm Lite)
+# Its boot files sit on a FAT partition that build-image.sh mounts inside the image (Bookworm:
+# /boot/firmware; older releases: /boot). Found by content, never by a fixed path; on images
+# without cmdline.txt (Orange Pi) this whole section does nothing.
+PI_BOOT=""
+for d in /boot/firmware /boot; do
+  if [ -f "$d/cmdline.txt" ]; then PI_BOOT="$d"; break; fi
+done
+if [ -n "$PI_BOOT" ]; then
+  log "Raspberry Pi OS: boot files in $PI_BOOT"
+  # Pi OS runs its own first-boot program from cmdline.txt (grows the root partition, then
+  # reboots). Our ffbridge-firstboot does that job, so take it out; root=PARTUUID=... and the
+  # rest of the line stay exactly as they are.
+  sed -i -E 's#[[:space:]]*init=/usr/lib/raspberrypi-sys-mods/firstboot##' "$PI_BOOT/cmdline.txt"
+  grep -q 'root=' "$PI_BOOT/cmdline.txt" || { echo "[customize] ERROR: cmdline.txt lost its root= setting"; exit 1; }
+  log "cmdline.txt: $(cat "$PI_BOOT/cmdline.txt")"
+  # Pi OS stops at first boot and asks on the screen for a user name and password
+  # (userconfig.service) unless a user already exists. This appliance has no login user
+  # (ffadmin is created only when ffbridge-config.txt says ssh=yes), so switch the question
+  # off. Its SSH-key service is replaced by our first boot too.
+  for s in userconfig regenerate_ssh_host_keys; do
+    systemctl disable "$s.service" 2>/dev/null || true
+    systemctl mask "$s.service" 2>/dev/null || true
+  done
+  rm -f /etc/systemd/system/getty@tty1.service.d/*.conf 2>/dev/null || true
+  rm -f "$PI_BOOT/userconf.txt" "$PI_BOOT/userconf" 2>/dev/null || true
+fi
+# <<< pi4-image
 
 # ---------------------------------------------------------------- tidy up
 restore_apt; trap - EXIT

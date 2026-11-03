@@ -253,6 +253,9 @@ def firstboot():
 # ----------------------------------------------------------------------------- SD card config
 def apply_config():
     os.makedirs(STATE_DIR, exist_ok=True)
+    # Raspberry Pi OS ships with Wi-Fi switched off (rfkill) until a country is chosen; the setup
+    # hotspot and the saved Wi-Fi both need it on. Harmless where it is already on (Orange Pi).
+    run(["rfkill", "unblock", "wifi"])
     cfg = parse_config()
     if not cfg:
         log("no ffbridge-config.txt settings found")
@@ -270,11 +273,14 @@ def apply_config():
     country = cfg.get("wifi_country", "").upper()
     if re.fullmatch(r"[A-Z]{2}", country):
         run(["iw", "reg", "set", country])
-        try:
-            with open("/etc/default/crda", "w") as f:
-                f.write(f"REGDOMAIN={country}\n")
-        except OSError:
-            pass
+        # keep it after a reboot: old images read /etc/default/crda, newer kernels the module option
+        for path, text in (("/etc/default/crda", f"REGDOMAIN={country}\n"),
+                           ("/etc/modprobe.d/ffbridge-regdom.conf", f"options cfg80211 ieee80211_regdom={country}\n")):
+            try:
+                with open(path, "w") as f:
+                    f.write(text)
+            except OSError:
+                pass
 
     complete = True
     ssid = cfg.get("wifi_name") or cfg.get("wifi_ssid") or ""

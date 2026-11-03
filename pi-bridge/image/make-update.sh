@@ -26,7 +26,7 @@ chmod 755 "$STAGE/usr/local/sbin/ffbridge-helper" 2>/dev/null || true
 mkdir -p "$OUT"
 tar -C "$STAGE" --owner=0 --group=0 -czf "$OUT/ffbridge-update.tar.gz" .
 SHA="$(sha256sum "$OUT/ffbridge-update.tar.gz" | cut -d' ' -f1)"
-python3 - "$OUT/ffbridge-update.json" "$VERSION" "$SHA" "$(bash "$HERE/image-hash.sh")" "$PIB/RELEASE-NOTES.md" "$BOARD" <<'PY'
+python3 - "$OUT/ffbridge-update.json" "$VERSION" "$SHA" "$(bash "$HERE/image-hash.sh" --board "$BOARD")" "$PIB/RELEASE-NOTES.md" "$BOARD" <<'PY'
 import json, sys, time
 out, version, sha, image_hash, notes, board = sys.argv[1:7]
 whats_new = ""
