@@ -48,6 +48,9 @@ class BrowserViewState extends State<BrowserView> {
   bool _loading = false;
   double _progress = 0;
   String? _pendingUrl;
+  bool _wipeWhenBlank = false; // closeSite loaded about:blank: clear the back history once it is there
+  int _pageReads = 0; // files being read out of the page (blob: downloads) — closing the page would break them
+  bool _closeAfterRead = false;
 
   @override
   void initState() {
@@ -65,6 +68,7 @@ class BrowserViewState extends State<BrowserView> {
 
   void openUrl(String url) {
     setState(() => _home = false);
+    _tipOnce();
     final c = _c;
     if (c == null) {
       _pendingUrl = url; // the web view is not made yet: it opens this first
@@ -112,7 +116,7 @@ class BrowserViewState extends State<BrowserView> {
 
   /// Every address change, also the ones a page makes itself without loading (those never reach _route).
   void _visited(InAppWebViewController c, WebUri? url) {
-    if (url == null) return;
+    if (url == null || url.toString() == 'about:blank') return;
     if (!_focus.hasFocus) _address.text = url.toString();
     final u = Uri.tryParse(url.toString());
     if (u != null && MakerWorld.isOpenApp(u)) _leaveHandyScreen(c, u);
@@ -158,11 +162,60 @@ class BrowserViewState extends State<BrowserView> {
     if (_home) return false;
     final c = _c;
     if (c != null && await c.canGoBack()) {
-      await c.goBack();
-      return true;
+      // the blank page closeSite left behind is not a place to go back to: that is the site picker
+      final h = await c.getCopyBackForwardList();
+      final list = h?.list ?? const <WebHistoryItem>[];
+      final i = (h?.currentIndex ?? 0) - 1;
+      final before = i >= 0 && i < list.length ? list[i].url?.toString() : null;
+      if (before != 'about:blank') {
+        await c.goBack();
+        return true;
+      }
     }
     setState(() => _home = true);
     return true;
+  }
+
+  // ------------------------------------------------------------------ double-tap on Models
+  /// Closes the open model site (its page and back history) and shows the site picker. Logins stay (cookies
+  /// and site data are untouched); downloads already running carry on (they don't use the page, except a
+  /// file being read out of the page, which is left to finish first).
+  Future<void> closeSite() async {
+    _focus.unfocus();
+    _address.clear();
+    setState(() {
+      _home = true;
+      _loading = false;
+    });
+    final c = _c;
+    if (c == null) return;
+    if (_pageReads > 0) {
+      _closeAfterRead = true;
+      return;
+    }
+    await _blank(c);
+  }
+
+  Future<void> _blank(InAppWebViewController c) async {
+    _closeAfterRead = false;
+    _wipeWhenBlank = true;
+    await c.stopLoading();
+    await c.loadUrl(urlRequest: URLRequest(url: WebUri('about:blank')));
+  }
+
+  /// The first time a site is opened: how to get back to the picker. A marker file in the app's cache
+  /// remembers it (if the cache is cleared, the tip shows once more).
+  bool _tipChecked = false;
+  Future<void> _tipOnce() async {
+    if (_tipChecked) return;
+    _tipChecked = true;
+    try {
+      final f = File('${(await Native.cacheDir()).path}/models-tip-shown');
+      if (await f.exists()) return;
+      await f.writeAsString('1');
+      await Future.delayed(const Duration(seconds: 2));
+      if (mounted && !_home) _snack('Tip: double-tap Models at the bottom to close this site and pick another.');
+    } catch (_) {}
   }
 
   void _go(String text) {
@@ -215,6 +268,17 @@ class BrowserViewState extends State<BrowserView> {
 
   /// Files a page makes itself (blob: links): the page reads them and hands them over.
   Future<void> _saveFromPage(String url, File dest) async {
+    _pageReads++;
+    try {
+      await _readFromPage(url, dest);
+    } finally {
+      _pageReads--;
+      final c = _c;
+      if (_pageReads == 0 && _closeAfterRead && c != null) await _blank(c);
+    }
+  }
+
+  Future<void> _readFromPage(String url, File dest) async {
     final r = await _c?.callAsyncJavaScript(functionBody: '''
       const r = await fetch(url);
       const b = await r.blob();
@@ -303,11 +367,18 @@ class BrowserViewState extends State<BrowserView> {
               if (u != null) c.loadUrl(urlRequest: URLRequest(url: WebUri(u)));
             },
             onLoadStart: (c, url) => setState(() {
+              if (url?.toString() == 'about:blank') return; // closeSite's blank page: stays behind the picker
               _loading = true;
               if (url != null && !_focus.hasFocus) _address.text = url.toString();
             }),
             onLoadStop: (c, url) {
               setState(() => _loading = false);
+              if (_wipeWhenBlank) {
+                // closeSite's blank page (or a site picked before it finished loading) is up: the closed
+                // site's pages are gone from Back
+                _wipeWhenBlank = false;
+                c.clearHistory();
+              }
               // last resort: MakerWorld's Handy screen got loaded anyway → open the model page instead
               final u = url == null ? null : Uri.tryParse(url.toString());
               if (u != null && MakerWorld.isOpenApp(u)) _leaveHandyScreen(c, u);
@@ -349,6 +420,8 @@ class _SitesHome extends StatelessWidget {
           ),
         ),
       const SizedBox(height: 12),
+      Text('Tip: double-tap Models at the bottom to close the open site and come back here (you stay logged in).', style: t.bodySmall),
+      const SizedBox(height: 6),
       Text('Tip: in your phone\'s browser or any app, Share a model page or file to Flash Bridge.', style: t.bodySmall),
     ]);
   }

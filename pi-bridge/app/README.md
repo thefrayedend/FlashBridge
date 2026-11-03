@@ -8,6 +8,7 @@ What it does:
 - **Printer** and **Slicer** tabs: the board's own web page (camera, controls, filament, Prepare / Paint / Preview).
 - **Models** tab: a browser for MakerWorld, Printables, Thingiverse, Thangs. Tapping Download on a model sends it
   to the board's slicer (ZIPs: every model inside); sliced files (G-code) go to the printer.
+  Double-tap the Models tab to close the open site and pick another (logins stay).
 - **Open with / Share**: 3MF, STL, OBJ, ZIP and G-code from any app; a shared model-page link opens in Models.
 - **Notifications** (Settings): the running print or slice in the notification bar with a progress bar (after
   Start print: sending the file %, unpacking, starting); alerts when a print finishes, pauses (also by the AI

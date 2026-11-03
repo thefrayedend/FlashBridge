@@ -11,6 +11,7 @@ import 'app_update.dart';
 import 'board.dart';
 import 'board_view.dart';
 import 'browser_view.dart';
+import 'double_tap.dart';
 import 'native.dart';
 import 'settings_view.dart';
 
@@ -95,7 +96,11 @@ class _ShellState extends State<Shell> {
 
   int get _stackIndex => _tab <= 1 ? 0 : _tab - 1;
 
+  final _tabTaps = DoubleTap();
+
   void _select(int i) {
+    // Models tapped twice quickly (from any tab): close the open model site and show the site picker
+    if (_tabTaps.tap(i, DateTime.now()) && i == 2) _browser.currentState?.closeSite();
     setState(() => _tab = i);
     if (i == 0) BoardNav.open('#home');
     if (i == 1) BoardNav.open('#slicer/prepare');
