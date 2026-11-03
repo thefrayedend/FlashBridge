@@ -232,7 +232,10 @@ input[type=checkbox], input[type=radio] { width: auto; }
 .cam-side-job #camera .job-actions .btn { flex: none; width: 100%; }
 .cam-side-job #camera #job .cam-bottom { position: static; margin-top: auto; justify-content: flex-end; }
 .cam-side-job #camera #job .cam-btn { background: var(--panel-2); color: var(--text); border: 1px solid var(--line); backdrop-filter: none; }
-.cam-side-job .cam-top { justify-content: flex-start; }
+/* Camera only: both badges together on the left, over the black strip - and only when they fit there
+   at normal size (app.js sets cam-badges-off otherwise: they are the first thing to go). */
+.cam-only .cam-top { justify-content: flex-start; }
+.cam-badges-off .cam-top { display: none; }
 
 .job { display: grid; grid-template-columns: 88px minmax(0, 1fr) auto; gap: 14px; align-items: center; }
 .job-thumb { width: 88px; height: 88px; border-radius: 10px; background: var(--panel-2); object-fit: contain; }

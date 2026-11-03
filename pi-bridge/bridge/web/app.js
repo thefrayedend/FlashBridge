@@ -327,6 +327,16 @@ function fitCamOnly() {
   }
   const side = on && strip >= SIDE_JOB_MIN;
   root.style.setProperty('--cam-strip', strip + 'px');
+  // The badges ("Printing 10%", "AI watching") are the first thing to go: in Camera only they show only
+  // when the black strip left of the picture holds them at normal size; otherwise they are hidden
+  // altogether (never over the picture, never in the card's way).
+  let badgesFit = false;
+  if (on) {
+    root.classList.remove('cam-badges-off');
+    const need = $$('.cam-top > *').filter((c) => c.offsetWidth > 0).reduce((w, c, i) => w + c.getBoundingClientRect().width + (i ? 8 : 0), 0);
+    badgesFit = need > 0 && need <= strip - 24;
+  }
+  root.classList.toggle('cam-badges-off', on && !badgesFit);
   if (side !== root.classList.contains('cam-side-job')) {
     root.classList.toggle('cam-side-job', side);
     if (side) {
@@ -360,13 +370,13 @@ function renderHome() {
   $('#welcome').classList.toggle('hidden', !!p || !state.status);
   $('#printer-view').classList.toggle('hidden', !p);
   if (!p) { $('#pending-banner').classList.add('hidden'); $('#ai-banner').classList.add('hidden'); return; }
-  fitCamOnly(); // the camera box has its size only now
   if (state.sel !== p.id) { state.sel = p.id; setCamera(); }
   setCamera();
   const [k, label] = jobStatus(p);
   $('#state-chip').innerHTML = `<span class="dot ${k}"></span>${esc(label)}`;
   const ai = p.aiEnabled && aiChips[p.ai?.status];
   $('#ai-chip').innerHTML = ai ? `<span class="dot ${ai[0]}"></span>${esc(ai[1])}` : '';
+  fitCamOnly(); // the camera box has its size only now, and the badges their text
 
   // banners
   const pend = p.pending;
