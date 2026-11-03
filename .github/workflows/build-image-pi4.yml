@@ -45,6 +45,7 @@ jobs:
           dart run test/backup_check.dart
           dart run test/finder_check.dart
           dart run test/slicer_check.dart
+          dart run test/sentname_check.dart
           dart run test/updater_check.dart
           python3 ../image/test/wifi_status_check.py
           python3 ../image/test/update_check.py
