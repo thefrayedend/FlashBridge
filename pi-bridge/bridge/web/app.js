@@ -329,7 +329,13 @@ function fitCamOnly() {
   root.style.setProperty('--cam-strip', strip + 'px');
   if (side !== root.classList.contains('cam-side-job')) {
     root.classList.toggle('cam-side-job', side);
-    if (side) $('#camera').append($('#job')); else applyLayout();
+    if (side) {
+      $('#camera').append($('#job'));
+      $('#job').append($('.cam-bottom')); // the two window buttons go along the bottom of the card
+    } else {
+      $('#camera').append($('.cam-bottom')); // back to the corner of the picture
+      applyLayout();
+    }
   }
   // a short window: leave out the job picture before anything has to scroll (text and buttons stay)
   if (side) {

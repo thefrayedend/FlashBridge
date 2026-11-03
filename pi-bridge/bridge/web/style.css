@@ -215,19 +215,24 @@ input[type=checkbox], input[type=radio] { width: auto; }
 .cam-only .col-side, .cam-only #job { display: none; }
 .cam-only .ico-cam-only, .ico-show-all { display: none; }
 .cam-only .ico-show-all { display: block; }
-/* Camera only on a wide window: the job card sits in the black strip right of the picture (app.js
-   sets cam-side-job and --cam-strip when the strip is wide enough for the card at normal size).
-   Stacked top to bottom, buttons under each other; nothing is made smaller. Kept clear of the
-   status chips (top) and the two camera buttons (bottom). */
+/* Camera only on a wide window: the job card fills the black strip right of the picture from top to
+   bottom (app.js sets cam-side-job and --cam-strip when the strip is wide enough for the card at
+   normal size). Stacked top to bottom: picture, name, progress, then Pause / Stop under each other,
+   and the two window buttons along the bottom of the card (app.js moves them in). The status and AI
+   badges sit together top-left. Nothing is made smaller. */
 .cam-side-job #camera #job {
-  display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 12px;
-  position: absolute; top: 60px; max-height: calc(100% - 124px); right: 12px; width: calc(var(--cam-strip, 0px) - 24px); margin: 0; overflow: auto;
+  display: flex; flex-direction: column; align-items: stretch; gap: 12px;
+  position: absolute; top: 12px; bottom: 12px; right: 12px; width: calc(var(--cam-strip, 0px) - 24px); margin: 0; overflow: auto;
 }
+.cam-side-job #camera #job > * { flex: none; }
 .cam-side-job #camera .job-thumb { width: 88px; height: 88px; }
 .cam-side-tight #camera .job-thumb { display: none; }
 .cam-side-job #camera .job-title { white-space: normal; overflow-wrap: anywhere; }
 .cam-side-job #camera .job-actions { grid-column: auto; flex-direction: column; }
 .cam-side-job #camera .job-actions .btn { flex: none; width: 100%; }
+.cam-side-job #camera #job .cam-bottom { position: static; margin-top: auto; justify-content: flex-end; }
+.cam-side-job #camera #job .cam-btn { background: var(--panel-2); color: var(--text); border: 1px solid var(--line); backdrop-filter: none; }
+.cam-side-job .cam-top { justify-content: flex-start; }
 
 .job { display: grid; grid-template-columns: 88px minmax(0, 1fr) auto; gap: 14px; align-items: center; }
 .job-thumb { width: 88px; height: 88px; border-radius: 10px; background: var(--panel-2); object-fit: contain; }
