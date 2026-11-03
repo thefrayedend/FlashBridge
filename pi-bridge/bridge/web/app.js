@@ -310,23 +310,28 @@ function setCamOnly(on, say = false) {
   if (say) toast(on ? 'Camera only. Tap the same button to show everything again.' : 'Showing everything again.');
 }
 // The top bar can be one or two rows (several printers): measure it so the camera uses the rest.
-// On a wide window the picture keeps its shape, so black strips stay left and right of it. When
-// the right strip is wide enough for the job card at its normal size, the card goes there
-// (the picture never shrinks, nor do the text or the buttons); otherwise the card stays hidden.
-const SIDE_JOB_MIN = 250; // px of free strip the card needs at normal size
+// On a wide window the picture keeps its shape, so black is left over beside it. When all that black
+// together is wide enough for the job card at its normal size, the picture slides to the left edge
+// and the card takes everything right of it (the picture never shrinks, nor do the text or the
+// buttons); otherwise the picture stays centred and the card stays hidden.
+const SIDE_JOB_MIN = 250; // px of black right of the picture the card needs at normal size
+const SIDE_JOB_KEEP = 242; // a card already shown stays until the room drops below this (no flicker)
 function fitCamOnly() {
   const root = document.documentElement;
   const on = root.classList.contains('cam-only');
   if (on) root.style.setProperty('--topbar-h', $('.topbar').offsetHeight + 'px');
-  let strip = 0;
+  const wasSide = root.classList.contains('cam-side-job');
+  let strip = 0, free = 0;
   if (on) {
     const box = $('#camera').getBoundingClientRect();
     const ar = parseFloat(getComputedStyle(root).getPropertyValue('--cam-ar')) || 1.333;
     const videoW = Math.min(box.width, box.height * ar);
-    strip = Math.max(0, Math.floor((box.width - videoW) / 2));
+    free = Math.max(0, box.width - videoW); // all the black, both sides together
+    strip = Math.max(0, Math.floor(free - 12)); // right of the picture once it sits at the left edge
   }
-  const side = on && strip >= SIDE_JOB_MIN;
+  const side = on && strip >= (wasSide ? SIDE_JOB_KEEP : SIDE_JOB_MIN);
   root.style.setProperty('--cam-strip', strip + 'px');
+  const leftStrip = side ? 12 : free / 2; // black left of the picture (centred when there is no card)
   // The badges ("Printing 10%", "AI watching") are the first thing to go: in Camera only they show only
   // when the black strip left of the picture holds them at normal size; otherwise they are hidden
   // altogether (never over the picture, never in the card's way).
@@ -334,7 +339,7 @@ function fitCamOnly() {
   if (on) {
     root.classList.remove('cam-badges-off');
     const need = $$('.cam-top > *').filter((c) => c.offsetWidth > 0).reduce((w, c, i) => w + c.getBoundingClientRect().width + (i ? 8 : 0), 0);
-    badgesFit = need > 0 && need <= strip - 24;
+    badgesFit = need > 0 && need <= leftStrip - 24;
   }
   root.classList.toggle('cam-badges-off', on && !badgesFit);
   if (side !== root.classList.contains('cam-side-job')) {

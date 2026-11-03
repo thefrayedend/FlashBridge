@@ -20,7 +20,7 @@ setup page, Spoolman, Discord, and AI print-failure detection (Obico model, runs
 ## What's new
 
 - **Phone app: double-tap the Models tab** to close the open model site and pick another (you stay logged in).
-- **Camera only on a wide screen: the job card now fills the space beside the picture,** with the window buttons inside the card; the status badges hide when there isn't room.
+- **Camera only on a wide screen:** the picture moves to the left and the job card (progress, time left, Pause and Stop, the window buttons) takes the black space beside it; the picture itself never shrinks. Status badges hide when there isn't room.
 - **Camera only on a wide screen now shows the job card beside the picture** (progress, time left, Pause and Stop) when there is room; the picture itself never shrinks.
 - **The job card shows the picture and the plain name of files sliced on the board again** (the printer stores them under a name with underscores).
 - **Raspberry Pi 4 (4 GB) image:** a second SD card image, `ffbridge-raspberrypi-4.img.xz` under the "Latest SD card image (Raspberry Pi 4)" release. Same features; it updates itself from its own release, and a board never installs another board's update.

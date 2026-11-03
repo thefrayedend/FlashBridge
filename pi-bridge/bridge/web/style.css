@@ -215,11 +215,12 @@ input[type=checkbox], input[type=radio] { width: auto; }
 .cam-only .col-side, .cam-only #job { display: none; }
 .cam-only .ico-cam-only, .ico-show-all { display: none; }
 .cam-only .ico-show-all { display: block; }
-/* Camera only on a wide window: the job card fills the black strip right of the picture from top to
-   bottom (app.js sets cam-side-job and --cam-strip when the strip is wide enough for the card at
-   normal size). Stacked top to bottom: picture, name, progress, then Pause / Stop under each other,
+/* Camera only on a wide window: the picture slides to the left edge and the job card fills the black
+   right of it from top to bottom (app.js sets cam-side-job and --cam-strip when all the black beside
+   the picture is wide enough for the card at normal size; the picture itself keeps its full size). Stacked top to bottom: picture, name, progress, then Pause / Stop under each other,
    and the two window buttons along the bottom of the card (app.js moves them in). The status and AI
    badges sit together top-left. Nothing is made smaller. */
+.cam-side-job #camera #cam-img { object-position: 12px 50%; }
 .cam-side-job #camera #job {
   display: flex; flex-direction: column; align-items: stretch; gap: 12px;
   position: absolute; top: 12px; bottom: 12px; right: 12px; width: calc(var(--cam-strip, 0px) - 24px); margin: 0; overflow: auto;
