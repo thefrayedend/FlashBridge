@@ -268,7 +268,11 @@ function setCamera(force = false) {
 function stopCamera() { cam.removeAttribute('src'); cam.dataset.src = ''; }
 // Size the camera box to the camera's real picture shape (no black bars). Camera streams don't
 // reliably fire 'load', so check the picture size a few times a second until it is known.
-function applyCamShape(ar) { if (ar > 0.3 && ar < 4) document.documentElement.style.setProperty('--cam-ar', ar.toFixed(4)); }
+function applyCamShape(ar) {
+  if (!(ar > 0.3 && ar < 4)) return;
+  document.documentElement.style.setProperty('--cam-ar', ar.toFixed(4));
+  fitCamOnly(); // the strips beside the picture depend on its shape
+}
 try { applyCamShape(parseFloat(localStorage.getItem('ffb-cam-ar'))); } catch (_) {}
 setInterval(() => {
   if (!cam.dataset.src || !cam.naturalWidth || !cam.naturalHeight) return;
@@ -305,10 +309,34 @@ function setCamOnly(on, say = false) {
   fitCamOnly();
   if (say) toast(on ? 'Camera only. Tap the same button to show everything again.' : 'Showing everything again.');
 }
-// the top bar can be one or two rows (several printers): measure it so the camera uses the rest
+// The top bar can be one or two rows (several printers): measure it so the camera uses the rest.
+// On a wide window the picture keeps its shape, so black strips stay left and right of it. When
+// the right strip is wide enough for the job card at its normal size, the card goes there
+// (the picture never shrinks, nor do the text or the buttons); otherwise the card stays hidden.
+const SIDE_JOB_MIN = 250; // px of free strip the card needs at normal size
 function fitCamOnly() {
-  if (!document.documentElement.classList.contains('cam-only')) return;
-  document.documentElement.style.setProperty('--topbar-h', $('.topbar').offsetHeight + 'px');
+  const root = document.documentElement;
+  const on = root.classList.contains('cam-only');
+  if (on) root.style.setProperty('--topbar-h', $('.topbar').offsetHeight + 'px');
+  let strip = 0;
+  if (on) {
+    const box = $('#camera').getBoundingClientRect();
+    const ar = parseFloat(getComputedStyle(root).getPropertyValue('--cam-ar')) || 1.333;
+    const videoW = Math.min(box.width, box.height * ar);
+    strip = Math.max(0, Math.floor((box.width - videoW) / 2));
+  }
+  const side = on && strip >= SIDE_JOB_MIN;
+  root.style.setProperty('--cam-strip', strip + 'px');
+  if (side !== root.classList.contains('cam-side-job')) {
+    root.classList.toggle('cam-side-job', side);
+    if (side) $('#camera').append($('#job')); else applyLayout();
+  }
+  // a short window: leave out the job picture before anything has to scroll (text and buttons stay)
+  if (side) {
+    const job = $('#job');
+    root.classList.remove('cam-side-tight');
+    if (job.scrollHeight > job.clientHeight + 1) root.classList.add('cam-side-tight');
+  } else root.classList.remove('cam-side-tight');
 }
 $('#btn-cam-only').addEventListener('click', () => setCamOnly(!document.documentElement.classList.contains('cam-only'), true));
 window.addEventListener('resize', fitCamOnly);
@@ -326,6 +354,7 @@ function renderHome() {
   $('#welcome').classList.toggle('hidden', !!p || !state.status);
   $('#printer-view').classList.toggle('hidden', !p);
   if (!p) { $('#pending-banner').classList.add('hidden'); $('#ai-banner').classList.add('hidden'); return; }
+  fitCamOnly(); // the camera box has its size only now
   if (state.sel !== p.id) { state.sel = p.id; setCamera(); }
   setCamera();
   const [k, label] = jobStatus(p);
@@ -1293,7 +1322,9 @@ function applyLayout(lo = getLayout()) {
   root.classList.toggle('lo-below', lo.side === 'below');
   root.classList.toggle('lo-fit', !!lo.fit);
   const job = $('#job');
-  if (lo.job === 'side') $('.col-side').prepend(job); else $('.col-main').append(job);
+  if (root.classList.contains('cam-side-job')) $('#camera').append(job); // Camera only: beside the picture
+  else if (lo.job === 'side') $('.col-side').prepend(job);
+  else $('.col-main').append(job);
 }
 function saveLayout(lo) {
   try { localStorage.setItem('ffb-layout', JSON.stringify(lo)); } catch (_) {}

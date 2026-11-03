@@ -215,6 +215,19 @@ input[type=checkbox], input[type=radio] { width: auto; }
 .cam-only .col-side, .cam-only #job { display: none; }
 .cam-only .ico-cam-only, .ico-show-all { display: none; }
 .cam-only .ico-show-all { display: block; }
+/* Camera only on a wide window: the job card sits in the black strip right of the picture (app.js
+   sets cam-side-job and --cam-strip when the strip is wide enough for the card at normal size).
+   Stacked top to bottom, buttons under each other; nothing is made smaller. Kept clear of the
+   status chips (top) and the two camera buttons (bottom). */
+.cam-side-job #camera #job {
+  display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 12px;
+  position: absolute; top: 60px; max-height: calc(100% - 124px); right: 12px; width: calc(var(--cam-strip, 0px) - 24px); margin: 0; overflow: auto;
+}
+.cam-side-job #camera .job-thumb { width: 88px; height: 88px; }
+.cam-side-tight #camera .job-thumb { display: none; }
+.cam-side-job #camera .job-title { white-space: normal; overflow-wrap: anywhere; }
+.cam-side-job #camera .job-actions { grid-column: auto; flex-direction: column; }
+.cam-side-job #camera .job-actions .btn { flex: none; width: 100%; }
 
 .job { display: grid; grid-template-columns: 88px minmax(0, 1fr) auto; gap: 14px; align-items: center; }
 .job-thumb { width: 88px; height: 88px; border-radius: 10px; background: var(--panel-2); object-fit: contain; }

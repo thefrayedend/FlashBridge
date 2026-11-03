@@ -390,7 +390,7 @@ class SetupServer {
       'online': b?.online ?? false,
       'stateMessage': b?.stateMessage ?? (c.enabled ? 'Starting...' : 'Disabled'),
       'jobState': b?.jobState ?? 'standby',
-      'jobFile': b?.jobFile ?? '',
+      'jobFile': b == null ? '' : b.files.localNameFor(b.jobFile), // the board's own name for the running job
       'progress': d?.printProgress ?? 0,
       'layer': d?.printLayer ?? 0,
       'layers': d?.targetPrintLayer ?? 0,

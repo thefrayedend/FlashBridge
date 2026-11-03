@@ -19,6 +19,8 @@ setup page, Spoolman, Discord, and AI print-failure detection (Obico model, runs
 
 ## What's new
 
+- **Camera only on a wide screen now shows the job card beside the picture** (progress, time left, Pause and Stop) when there is room; the picture itself never shrinks.
+- **The job card shows the picture and the plain name of files sliced on the board again** (the printer stores them under a name with underscores).
 - **Raspberry Pi 4 (4 GB) image:** a second SD card image, `ffbridge-raspberrypi-4.img.xz` under the "Latest SD card image (Raspberry Pi 4)" release. Same features; it updates itself from its own release, and a board never installs another board's update.
 - **"Camera only" button on the camera** (where the bulb was): tap it and the camera fills the window; tap again to show everything. The printer light is still in Controls.
 - **Phone app: after Start print the notification shows sending the file (with %), unpacking and starting,** and tells you if the printer refused the file.

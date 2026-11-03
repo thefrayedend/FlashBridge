@@ -274,15 +274,16 @@ class PrinterBridge {
       _clearPending();
       jobFile = fname;
       _jobStart = DateTime.now();
+      final local = files.localNameFor(fname); // the board's own name when the printer stores it with "_"
       final cur = history.current;
-      if (cur != null && (cur['filename'] == fname || cur['filename'] == FileManager.displayName(fname))) {
+      if (cur != null && (cur['filename'] == fname || cur['filename'] == FileManager.displayName(fname) || cur['filename'] == FileManager.displayName(local))) {
         // bridge restarted mid-print: keep tracking the existing job
         _jobStart = DateTime.fromMillisecondsSinceEpoch(((cur['start_time'] as num) * 1000).round());
         return;
       }
       final meta = files.metadataFor(fname) ?? {};
       if (cur != null) history.finish('interrupted');
-      final job = history.start(FileManager.displayName(fname), meta);
+      final job = history.start(FileManager.displayName(local), meta);
       _emit('notify_history_changed', [
         {'action': 'added', 'job': job}
       ]);
@@ -634,6 +635,7 @@ class PrinterBridge {
       });
       final sentAs = FlashForgeClient.printerFileName(name);
       files.printerFiles[sentAs] = DateTime.now().millisecondsSinceEpoch / 1000.0;
+      files.rememberSentAs(sentAs, name);
       gcodeResponse('// Upload to printer complete: $name${sentAs != name ? ' (stored on the printer as $sentAs)' : ''}');
     } finally {
       uploadStatus = '';

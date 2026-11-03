@@ -58,7 +58,8 @@ class PrinterApi {
       'errorCode': d.errorCode,
       'error': b.currentError?.toJson(),
       'filamentWeight': d.estimatedRightWeight,
-      'jobThumb': b.jobFile.isEmpty ? '' : thumbUrl(b, b.jobFile),
+      // the printer reports the job under the name it stored (spaces -> "_"); the board's own file has the picture
+      'jobThumb': b.jobFile.isEmpty ? '' : thumbUrl(b, b.files.localNameFor(b.jobFile)),
       'slots': [
         for (final s in d.slots)
           {'slotId': s.slotId, 'hasFilament': s.hasFilament, 'material': s.materialName, 'color': _hex(s.materialColor), 'colorName': colorName(_hex(s.materialColor))}
@@ -171,7 +172,7 @@ class PrinterApi {
         'modified': e['modified'],
         'size': e['size'],
         'local': b.files.isLocal(real),
-        'onPrinter': b.files.printerFiles.containsKey(real.split('/').last),
+        'onPrinter': b.files.onPrinter(real),
         'estimatedTime': meta['estimated_time'],
         'filamentType': meta['filament_type'],
         'filamentWeight': meta['filament_weight_total'] ?? meta['filament_total'],

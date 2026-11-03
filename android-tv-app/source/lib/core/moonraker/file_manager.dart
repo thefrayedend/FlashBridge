@@ -4,6 +4,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import '../ff/ff_client.dart' show FlashForgeClient;
 import 'metadata.dart';
 
 class RpcError implements Exception {
@@ -26,6 +27,14 @@ class FileManager {
   final Map<String, double> printerFiles = {};
   final Map<String, int> printerFileTimes = {}; // printingTime (s) from AD5X detail lists
 
+  /// The printer stores our uploads under an OrcaSlicer-style name (spaces and other characters
+  /// become "_", see FlashForgeClient.printerFileName) and reports the job under that name.
+  /// printer name -> the board's own file name, so the running job still finds its picture and
+  /// metadata. Kept on disk so a bridge restart mid-print does not lose it.
+  final Map<String, String> _sentNames = {};
+  late final File _sentFile = File('$dataDir/sent_names.json');
+  final Map<String, DateTime> _sentMiss = {}; // printer names with no local match (per gcodes folder change)
+
   FileManager(this.dataDir) {
     for (final d in [gcodes, Directory('${gcodes.path}/.thumbs'), config, logs]) {
       d.createSync(recursive: true);
@@ -33,6 +42,54 @@ class FileManager {
     try {
       _metaCache = Map<String, dynamic>.from(jsonDecode(_metaFile.readAsStringSync()));
     } catch (_) {}
+    try {
+      _sentNames.addAll(Map<String, String>.from(jsonDecode(_sentFile.readAsStringSync())));
+    } catch (_) {}
+  }
+
+  /// Records that the board's [localName] was sent to the printer as [printerName].
+  void rememberSentAs(String printerName, String localName) {
+    _sentMiss.remove(printerName);
+    if (printerName == localName || localName.isEmpty) return;
+    if (_sentNames[printerName] == localName) return;
+    _sentNames[printerName] = localName;
+    try {
+      _sentFile.writeAsStringSync(jsonEncode(_sentNames));
+    } catch (_) {}
+  }
+
+  /// The board's own file for a name as the printer reports it (the running job, /gcodeList).
+  /// Returns [printerName] itself when that file exists locally or nothing matches.
+  String localNameFor(String printerName) {
+    if (printerName.isEmpty || printerName.contains('/')) return printerName;
+    if (File('${gcodes.path}/${safeRel(printerName)}').existsSync()) return printerName;
+    final known = _sentNames[printerName];
+    if (known != null && File('${gcodes.path}/${safeRel(known)}').existsSync()) return known;
+    // Not recorded (sent by an older version, or the record is gone): the local file whose printer
+    // name is this one. Scanned once per change of the gcodes folder.
+    DateTime? folder;
+    try {
+      folder = gcodes.statSync().modified;
+    } catch (_) {}
+    if (_sentMiss[printerName] == folder) return printerName;
+    try {
+      for (final e in gcodes.listSync()) {
+        if (e is! File) continue;
+        final n = e.uri.pathSegments.where((s) => s.isNotEmpty).last;
+        if (n != printerName && FlashForgeClient.printerFileName(n) == printerName) {
+          rememberSentAs(printerName, n);
+          return n;
+        }
+      }
+    } catch (_) {}
+    if (folder != null) _sentMiss[printerName] = folder;
+    return printerName;
+  }
+
+  /// True when the printer holds [localName] (under its own or the printer-style name).
+  bool onPrinter(String localName) {
+    final n = localName.split('/').last;
+    return printerFiles.containsKey(n) || printerFiles.containsKey(FlashForgeClient.printerFileName(n));
   }
 
   void _saveMeta() {
@@ -87,14 +144,15 @@ class FileManager {
     return real;
   }
 
-  /// Maps a (possibly aliased) gcodes-relative name to the real file name.
+  /// Maps a (possibly aliased) gcodes-relative name to the real file name: the ".3mf.gcode" alias
+  /// back to ".gcode.3mf", and a name as the printer stores it back to the board's own file.
   String resolve(String name) {
-    if (!name.toLowerCase().endsWith('.3mf.gcode')) return name;
+    if (!name.toLowerCase().endsWith('.3mf.gcode')) return localNameFor(name);
     final direct = File('${gcodes.path}/${safeRel(name)}');
     if (direct.existsSync()) return name;
     final base = name.substring(0, name.length - 10);
     for (final cand in ['$base.gcode.3mf', '$base.3mf']) {
-      if (printerFiles.containsKey(cand) || File('${gcodes.path}/${safeRel(cand)}').existsSync()) return cand;
+      if (printerFiles.containsKey(cand) || File('${gcodes.path}/${safeRel(cand)}').existsSync()) return localNameFor(cand);
     }
     return name;
   }
@@ -139,7 +197,7 @@ class FileManager {
     }
     if (root == 'gcodes' && rel.isEmpty) {
       for (final pf in printerFiles.entries) {
-        if (seen.contains(pf.key)) continue;
+        if (seen.contains(pf.key) || localNameFor(pf.key) != pf.key) continue; // our file under its printer name
         final entry = <String, dynamic>{'filename': displayName(pf.key), 'modified': pf.value, 'size': 0, 'permissions': 'r'};
         if (extended) entry.addAll(metadataFor(pf.key) ?? {});
         files.add(entry);
@@ -166,7 +224,8 @@ class FileManager {
     }
     if (root == 'gcodes') {
       for (final pf in printerFiles.entries) {
-        if (!seen.contains(pf.key)) out.add({'path': displayName(pf.key), 'modified': pf.value, 'size': 0, 'permissions': 'r'});
+        if (seen.contains(pf.key) || localNameFor(pf.key) != pf.key) continue; // our file under its printer name
+        out.add({'path': displayName(pf.key), 'modified': pf.value, 'size': 0, 'permissions': 'r'});
       }
     }
     return out;
