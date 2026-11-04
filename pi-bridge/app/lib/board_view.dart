@@ -88,6 +88,9 @@ class _BoardViewState extends State<BoardView> {
           supportMultipleWindows: false,
           mixedContentMode: MixedContentMode.MIXED_CONTENT_ALWAYS_ALLOW,
           cacheMode: CacheMode.LOAD_DEFAULT,
+          // tells the board's pages they run inside the phone app (User-Agent ends with "FlashBridgeApp"), so
+          // they can hide parts that don't suit the app (APP-NOTES.md); the model-site browser doesn't send it
+          applicationNameForUserAgent: 'FlashBridgeApp',
         ),
         onWebViewCreated: (c) {
           BoardNav.controller = c;
