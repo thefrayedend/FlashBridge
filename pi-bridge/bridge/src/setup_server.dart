@@ -140,19 +140,43 @@ class SetupServer {
     return {'ok': true, ..._customJson()};
   }
 
-  static const _customMaxBytes = 5 * 1024 * 1024;
+  /// Up to 100 MB. The upload is streamed straight to the SD card (parseMultipart writes as it reads;
+  /// nothing is held in memory - the board's 4 GB are shared with the slicer). Dart's HttpServer has
+  /// no body limit of its own and the board serves the page directly (no proxy in between).
+  static const _customMaxBytes = 100 * 1024 * 1024;
+  static const _customFreeMargin = 64 * 1024 * 1024; // keep this much free on the card after the upload
+
+  /// Free bytes on the file system that holds [dir] (Linux df; -1 if unknown).
+  static Future<int> _freeBytes(Directory dir) async {
+    try {
+      final r = await Process.run('df', ['-P', '-B1', dir.path]);
+      final lines = (r.stdout as String).trim().split('\n');
+      if (r.exitCode != 0 || lines.length < 2) return -1;
+      final cols = lines.last.split(RegExp(r'\s+'));
+      return cols.length >= 4 ? int.tryParse(cols[3]) ?? -1 : -1;
+    } catch (_) {
+      return -1;
+    }
+  }
 
   Future<Map<String, dynamic>> _uploadCustom(HttpRequest req) async {
     final boundary = req.headers.contentType?.parameters['boundary'];
     if (boundary == null) return {'ok': false, 'message': 'Expected a file upload.'};
     final dir = _customHtml.parent..createSync(recursive: true);
+    // refuse before reading anything when the size is known up front
+    final declared = req.contentLength;
+    if (declared > _customMaxBytes + 4096) return {'ok': false, 'message': 'The file is too big (more than 100 MB).'};
+    final free = await _freeBytes(dir);
+    if (free >= 0 && declared > 0 && declared + _customFreeMargin > free) {
+      return {'ok': false, 'message': 'The SD card is nearly full (${(free / 1048576).round()} MB free); the page does not fit.'};
+    }
     final tmp = File('${dir.path}/upload_${DateTime.now().microsecondsSinceEpoch}.tmp');
     try {
       final mp = await parseMultipart(req, boundary, tmp);
       if (mp.file == null || !tmp.existsSync()) return {'ok': false, 'message': 'No file received.'};
       final name = (mp.fileName ?? '').toLowerCase();
       if (!(name.endsWith('.html') || name.endsWith('.htm'))) return {'ok': false, 'message': 'Choose an HTML file (.html).'};
-      if (tmp.lengthSync() > _customMaxBytes) return {'ok': false, 'message': 'The file is too big (more than 5 MB).'};
+      if (tmp.lengthSync() > _customMaxBytes) return {'ok': false, 'message': 'The file is too big (more than 100 MB).'};
       if (tmp.lengthSync() == 0) return {'ok': false, 'message': 'The file is empty.'};
       if (_customHtml.existsSync()) _customHtml.deleteSync();
       tmp.renameSync(_customHtml.path);

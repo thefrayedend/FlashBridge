@@ -19,6 +19,8 @@ setup page, Spoolman, Discord, and AI print-failure detection (Obico model, runs
 
 ## What's new
 
+- Pressing Settings now checks for an update; if there is one, a box offers to install it.
+- The Custom tab's uploaded HTML file can be up to 100 MB.
 - The Camera only button is gone from the Dashboard; use the Printer Preview tab instead.
 - The Custom tab is for browsers only; the phone app does not show it.
 - The Printer tab is now called Printer Dashboard.

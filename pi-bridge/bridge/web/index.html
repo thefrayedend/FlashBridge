@@ -179,6 +179,7 @@
         <a class="back" href="#home">‹ Printer</a>
         <h1>Settings</h1>
       </div>
+      <p class="small muted hidden" id="settings-update-line"></p>
       <nav class="seg-tabs" id="settings-tabs">
         <a href="#settings/general" data-tab="general">General</a>
         <a href="#settings/network" data-tab="network">Wi-Fi</a>
@@ -228,7 +229,7 @@
                 <button class="btn small ghost-danger hidden" type="button" id="ct-remove">Remove</button>
               </div>
               <input type="file" id="ct-file" accept=".html,.htm,text/html" hidden>
-              <p class="hint">Up to 5 MB. The page runs on its own: it can't change printer settings or start prints.</p>
+              <p class="hint">Up to 100 MB. The page runs on its own: it can't change printer settings or start prints.</p>
             </div>
             <div class="row gap"><button class="btn primary" type="button" id="ct-save">Save</button></div>
           </div>
@@ -539,6 +540,17 @@
     </form>
   </dialog>
 
+  <dialog id="update-dialog" class="small-dialog">
+    <form method="dialog" class="stack">
+      <h2 id="ud-title">An update is available</h2>
+      <div class="update-notes" id="ud-notes"></div>
+      <p class="muted">Installing takes about a minute; prints keep running. If the new version doesn't start, the board goes back to this one by itself.</p>
+      <div class="row gap end">
+        <button class="btn" value="later">Not now</button>
+        <button class="btn primary" type="button" id="ud-install">Install</button>
+      </div>
+    </form>
+  </dialog>
   <dialog id="confirm-dialog" class="small-dialog">
     <form method="dialog" class="stack">
       <h2 id="cf-title">Are you sure?</h2>

@@ -191,6 +191,7 @@ async function refreshStatus() {
     showModeTabs();
     if (state.view === 'slicer' && !slicerOn()) location.hash = '#home';
     $('#update-dot').classList.toggle('hidden', !(s.update && s.update.available));
+    if (s.update && s.update.available) offerUpdate(s.update.latest); // the board's own check found one: same pop-up
     if (state.view === 'home') renderHome();
     // a print that failed after its dialog closed (big files upload in the background)
     const firstLook = !state.printErrSeen; // errors from before this page was opened are not shown
@@ -1278,6 +1279,50 @@ async function waitForUpdate(oldVersion) {
     else setTimeout(() => waitForUpdate(oldVersion), 3000);
   } catch (_) { setTimeout(() => waitForUpdate(oldVersion), 3000); } // bridge restarting
 }
+// The update pop-up: shown when the board's scheduled check finds a newer version (once per version
+// and page, "Not now" keeps it quiet) and when the Settings gear is pressed (always, if one exists).
+let updateOffered = '';
+function offerUpdate(version, {force = false} = {}) {
+  if (!version || (!force && updateOffered === version)) return;
+  if (document.querySelector('dialog[open]')) return; // another box is open; the next status poll tries again
+  updateOffered = version;
+  api('update').then((u) => {
+    if (!u.available || u.imageRequired) return; // a new-image case is explained in Settings -> System
+    $('#ud-title').textContent = `Version ${u.latest} is available`;
+    $('#ud-notes').textContent = (u.notes || '').replace(/\*\*/g, '');
+    $('#ud-notes').classList.toggle('hidden', !u.notes);
+    $('#update-dialog').showModal();
+  });
+}
+$('#ud-install').addEventListener('click', async () => {
+  $('#update-dialog').close();
+  const r = await api('update/install', { method: 'POST' });
+  if (!r.ok) { toast(r.message || 'Could not start the update.', true); return; }
+  toast('Updating… the page reloads when it\'s done.');
+  const cur = (state.status && state.status.version) || '';
+  setTimeout(() => { if (state.view === 'settings' && state.sub === 'system') loadUpdate(); else waitForUpdate(cur); }, 1500);
+});
+// Pressing the Settings gear also checks for an update (does not hold up Settings; no error pop-up)
+let updateLine = null; // what the last gear check found, shown quietly in Settings
+$('#btn-settings').addEventListener('click', () => {
+  updateLine = null;
+  renderUpdateLine();
+  api('update/check', { method: 'POST' }).then((u) => {
+    if (!u || !u.configured) return;
+    if (u.available && !u.imageRequired) { offerUpdate(u.latest, { force: true }); updateLine = `Version ${u.latest} is available.`; }
+    else if (u.available) updateLine = `Version ${u.latest} needs a new SD card image (see Advanced → System).`;
+    else if (u.checkError) updateLine = 'Could not check for updates right now.';
+    else updateLine = `You're up to date (version ${u.current}).`;
+    renderUpdateLine();
+    $('#update-dot').classList.toggle('hidden', !u.available);
+    if (state.view === 'settings' && state.sub === 'system') loadUpdate();
+  }).catch(() => {});
+});
+function renderUpdateLine() {
+  const el = $('#settings-update-line');
+  el.textContent = updateLine || '';
+  el.classList.toggle('hidden', !updateLine);
+}
 $('#btn-update-check').addEventListener('click', async (e) => {
   e.target.disabled = true; e.target.textContent = 'Checking…';
   await api('update/check', { method: 'POST' });
@@ -1426,7 +1471,7 @@ $('#ct-file').addEventListener('change', async () => {
   const f = $('#ct-file').files[0];
   $('#ct-file').value = '';
   if (!f) return;
-  if (f.size > 5 * 1024 * 1024) { toast('The file is too big (more than 5 MB).', true); return; }
+  if (f.size > 100 * 1024 * 1024) { toast('The file is too big (more than 100 MB).', true); return; }
   const fd = new FormData();
   fd.append('file', f, f.name);
   $('#ct-upload').disabled = true;

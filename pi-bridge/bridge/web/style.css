@@ -419,6 +419,7 @@ dialog.small-dialog { width: min(400px, calc(100% - 24px)); }
 #btn-settings { position: relative; }
 .badge { position: absolute; top: 6px; right: 6px; width: 9px; height: 9px; border-radius: 50%; background: var(--err); border: 2px solid var(--panel); }
 .update-notes { white-space: pre-wrap; font-weight: 400; margin-top: 6px; font-size: 13px; }
+#update-dialog .update-notes { max-height: 40vh; overflow: auto; padding: 8px 10px; border-radius: 10px; background: var(--panel-2); }
 .field input[type="range"] { width: 100%; max-width: 420px; display: block; padding: 0; }
 
 /* ------------------------------------------------------------ screen switch in the top bar */
