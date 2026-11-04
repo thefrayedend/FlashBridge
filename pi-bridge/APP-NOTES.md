@@ -55,6 +55,8 @@ same time**, and never rename or remove JSON fields the app reads (`app/README.m
   When editing it, it is a good place to add a small `api` version number and a `capabilities` list.
 - The board speaks plain HTTP on the local network. Android allows that only for listed hosts or
   with `usesCleartextTraffic` — fine for a local app, just don't make anything depend on HTTPS.
+- The app's board web view identifies itself with `FlashBridgeApp` in its User-Agent; pages may hide
+  app-unsuitable parts on that (today: the optional Custom tab and its Settings section stay browser-only).
 
 ## Already there
 
@@ -63,3 +65,20 @@ same time**, and never rename or remove JSON fields the app reads (`app/README.m
 
 - `android-tv-app/` is a Flutter Android app (the older TV bridge): build setup and Android know-how
   exist and an APK can be built by GitHub Actions like the SD card image.
+
+## The page's tabs and the Custom tab (contract additions, 2026-11-04, board 1.0.45+)
+
+- Hash routes the app may deep-link to: `#home` = **Printer Dashboard** (label changed, route unchanged);
+  `#preview-printer` = **Printer Preview** (camera-only layout, job card beside the picture, no window buttons);
+  `#custom` = the optional **Custom** tab (only when switched on). A print started from the slicer lands on
+  `#preview-printer`; a print started from the Dashboard stays on `#home`.
+- `/api/status` gained `customTab {enabled, name, mode ('url'|'file'), url, hasFile}` — added field only.
+- New endpoints, all local-network only like the rest: `GET/POST /api/custom` (settings), `POST /api/custom/upload`
+  (multipart, one `.html`, ≤ 5 MB), `POST /api/custom/remove`, `GET /api/custom/check?url=` (can the site be framed),
+  and the uploaded page at `/custom/index.html` (served with `Content-Security-Policy: sandbox allow-scripts
+  allow-forms allow-popups`, so it cannot call the board's API).
+- **How the page knows it is inside the phone app:** the app's board web view sets `applicationNameForUserAgent`
+  to `FlashBridgeApp`, so its User-Agent contains `FlashBridgeApp`. The page hides parts that make no sense in the
+  app (first: the Custom tab, which Jon wants off the phone) when `navigator.userAgent.includes('FlashBridgeApp')`.
+  (App: upload 40-app-board-ua-marker; page: in upload 39 v2.)
+
