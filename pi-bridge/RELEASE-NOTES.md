@@ -19,6 +19,9 @@ setup page, Spoolman, Discord, and AI print-failure detection (Obico model, runs
 
 ## What's new
 
+- The Printer tab is now called Printer Dashboard.
+- New Printer Preview tab: the camera with the job card beside it; sending a print from the slicer opens it.
+- Optional Custom tab (Settings): show a web page or your own HTML file.
 - The built-in slicer uses OrcaSlicer 2.5's Flashforge profiles, so the same choices give the same settings as OrcaSlicer on a PC (smoother colour changes on the Creator 5, the 0.25 mm nozzle, the Adventurer A5), and the prime tower now goes beside your model like in OrcaSlicer.
 - **Phone app: double-tap the Models tab** to close the open model site and pick another (you stay logged in).
 - **Camera only on a wide screen:** the picture moves to the left and the job card (progress, time left, Pause and Stop, the window buttons) takes the black space beside it; the picture itself never shrinks. Status badges hide when there isn't room.

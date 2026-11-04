@@ -10,7 +10,7 @@ const store = {
   set(k, v) { try { localStorage.setItem(k, v); } catch (_) { /* private mode */ } },
 };
 
-const state = { status: null, ai: null, view: 'home', tab: 'general', sub: 'printers', sel: store.get('ffb.sel', ''), scanned: [], pendingSeen: '' };
+const state = { status: null, ai: null, view: 'home', home: 'dashboard', tab: 'general', sub: 'printers', sel: store.get('ffb.sel', ''), scanned: [], pendingSeen: '' };
 
 async function api(path, { method = 'GET', body } = {}) {
   const res = await fetch('/api/' + path, {
@@ -83,11 +83,17 @@ function verdict(fil, slot) {
 // ---------------------------------------------------------------- routing
 function route() {
   const parts = (location.hash.slice(1) || 'home').split('/');
-  state.view = ['settings', 'help', 'slicer'].includes(parts[0]) ? parts[0] : 'home';
+  state.view = ['settings', 'help', 'slicer', 'custom'].includes(parts[0]) ? parts[0] : 'home';
+  // "Printer Preview" is the printer screen in its Camera-only layout, as a tab of its own
+  state.home = parts[0] === 'preview-printer' ? 'preview' : 'dashboard';
   if (state.view === 'slicer' && !slicerOn()) { location.hash = '#home'; return; }
-  const mode = state.view === 'slicer' ? (['prepare', 'paint', 'preview'].includes(parts[1]) ? parts[1] : 'prepare') : (state.view === 'home' ? 'home' : '');
+  if (state.view === 'custom' && !customTab().enabled) { location.hash = '#home'; return; }
+  const mode = state.view === 'slicer' ? (['prepare', 'paint', 'preview'].includes(parts[1]) ? parts[1] : 'prepare')
+    : state.view === 'home' ? (state.home === 'preview' ? 'preview-printer' : 'home') : (state.view === 'custom' ? 'custom' : '');
   $$('#mode-tabs a').forEach((a) => a.classList.toggle('active', a.dataset.mode === mode));
   document.documentElement.classList.toggle('in-slicer', state.view === 'slicer');
+  document.documentElement.classList.toggle('in-custom', state.view === 'custom');
+  applyCamMode();
   if (state.view === 'help') showHelp(parts[1] || 'start');
   if (state.view === 'settings') {
     state.tab = ['general', 'network', 'advanced'].includes(parts[1]) ? parts[1] : 'general';
@@ -101,10 +107,11 @@ function route() {
   $$('#adv-tabs a').forEach((a) => a.classList.toggle('active', a.dataset.sub === state.sub));
   $$('.subpage').forEach((t) => t.classList.toggle('active', t.id === 'sub-' + state.sub));
   if (state.view === 'home') { setCamera(); renderHome(); } else stopCamera();
+  if (state.view === 'custom') renderCustom(); else unloadCustom();
   if (state.view === 'slicer') loadSlicer().then((m) => m && m.show(mode));
   else if (slicerMod) slicerMod.hide();
   if (state.view === 'settings') {
-    if (state.tab === 'general') { loadSettings(); renderLayoutForm(); loadSlicerSettings(); }
+    if (state.tab === 'general') { loadSettings(); renderLayoutForm(); loadSlicerSettings(); loadCustomSettings(); }
     if (state.tab === 'network') loadNetwork(true);
     if (state.tab === 'advanced') {
       if (state.sub === 'printers') renderPrinterList();
@@ -130,8 +137,14 @@ function loadSlicer() {
   return slicerLoading;
 }
 function showModeTabs() {
-  $('#mode-tabs').classList.toggle('hidden', !slicerOn() || !printers().length);
+  $('#mode-tabs').classList.toggle('hidden', !printers().length);
+  $$('#mode-tabs .sl-tab').forEach((a) => a.classList.toggle('hidden', !slicerOn()));
+  const ct = customTab();
+  $('#tab-custom').classList.toggle('hidden', !ct.enabled);
+  $('#tab-custom-name').textContent = ct.name || 'Custom';
+  $('#tab-custom').title = ct.name || 'Custom';
 }
+const customTab = () => (state.status && state.status.customTab) || { enabled: false, name: 'Custom', mode: 'url', url: '', hasFile: false };
 
 // ---------------------------------------------------------------- help
 let helpTopics = null;
@@ -300,14 +313,21 @@ $('#btn-fullscreen').addEventListener('click', () => {
 // controls hidden; not the browser's full screen). Remembered per browser; the same button brings
 // everything back. style.css does the layout from the cam-only class on <html>.
 function setCamOnly(on, say = false) {
-  document.documentElement.classList.toggle('cam-only', on);
+  store.set('ffb-cam-only', on ? '1' : '0');
   const b = $('#btn-cam-only');
   b.title = on ? 'Show everything' : 'Camera only';
   b.setAttribute('aria-label', b.title);
   b.setAttribute('aria-pressed', on ? 'true' : 'false');
-  store.set('ffb-cam-only', on ? '1' : '0');
-  fitCamOnly();
+  applyCamMode();
   if (say) toast(on ? 'Camera only. Tap the same button to show everything again.' : 'Showing everything again.');
+}
+// The Printer Preview tab is the Camera-only layout, always, without the two window buttons; the
+// Dashboard uses the choice saved by its own button.
+function applyCamMode() {
+  const preview = state.view === 'home' && state.home === 'preview';
+  document.documentElement.classList.toggle('preview-tab', preview);
+  document.documentElement.classList.toggle('cam-only', preview || store.get('ffb-cam-only', '0') === '1');
+  fitCamOnly();
 }
 // The top bar can be one or two rows (several printers): measure it so the camera uses the rest.
 // On a wide window the picture keeps its shape, so black is left over beside it. When all that black
@@ -362,6 +382,8 @@ function fitCamOnly() {
 $('#btn-cam-only').addEventListener('click', () => setCamOnly(!document.documentElement.classList.contains('cam-only'), true));
 window.addEventListener('resize', fitCamOnly);
 setCamOnly(store.get('ffb-cam-only', '0') === '1');
+window.addEventListener('resize', measureTopbar);
+function measureTopbar() { document.documentElement.style.setProperty('--topbar-h', $('.topbar').offsetHeight + 'px'); }
 
 // ---------------------------------------------------------------- home
 const aiChips = {
@@ -796,7 +818,9 @@ $('#pr-start').addEventListener('click', async () => {
   $('#print-dialog').close();
   toast(r.message || 'Print started');
   // watch it happen: the printer view shows the camera, the upload progress, then the print
-  if (state.view !== 'home') location.hash = '#home';
+  // (a print sent from the slicer opens the Printer Preview tab; anything else stays on the Dashboard)
+  if (printCtx.from === 'slicer') location.hash = '#preview-printer';
+  else if (state.view !== 'home') location.hash = '#home';
   setTimeout(refreshStatus, 1000);
 });
 $('#pr-cancel').addEventListener('click', async () => {
@@ -1328,6 +1352,114 @@ document.addEventListener('click', (e) => {
   (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject()).then(() => toast('Copied'), () => toast(text));
 });
 
+// ---------------------------------------------------------------- the Custom tab (a web address or an uploaded HTML file)
+let customShown = ''; // what the frame currently shows, so a status poll does not reload it
+const frameChecks = {}; // web address -> {framable, reason} from the board
+function renderCustom() {
+  const ct = customTab();
+  const frame = $('#custom-frame');
+  measureTopbar();
+  const want = ct.mode === 'file' ? (ct.hasFile ? '/custom/index.html' : '') : (ct.url || '');
+  const show = (which) => {
+    $('#custom-setup').classList.toggle('hidden', which !== 'setup');
+    $('#custom-blocked').classList.toggle('hidden', which !== 'blocked');
+    frame.classList.toggle('hidden', which !== 'frame');
+  };
+  if (!want) { unloadCustom(); show('setup'); return; }
+  if (customShown === want) return;
+  unloadCustom();
+  customShown = want;
+  if (ct.mode === 'file') {
+    // the user's own page runs in a sandbox: no access to the board's API or printer controls
+    frame.setAttribute('sandbox', 'allow-scripts allow-forms allow-popups');
+    frame.src = want + '?v=' + Date.now();
+    show('frame');
+    return;
+  }
+  frame.removeAttribute('sandbox');
+  $('#custom-open').href = want;
+  const blocked = (why) => { frame.removeAttribute('src'); $('#custom-blocked-text').textContent = why || 'Some websites refuse to appear inside another page. You can still open it on its own.'; show('blocked'); };
+  const load = () => {
+    frame.src = want;
+    show('frame');
+    // no answer from the site at all: don't leave an empty frame
+    let loaded = false;
+    frame.onload = () => { loaded = true; };
+    setTimeout(() => { if (!loaded && customShown === want && state.view === 'custom') blocked('The page did not load. You can open it on its own.'); }, 20000);
+  };
+  const known = frameChecks[want];
+  if (known) { if (known.framable) load(); else blocked(known.reason); return; }
+  show('frame'); // while the board checks the site (a second at most)
+  api('custom/check?url=' + encodeURIComponent(want)).then((r) => {
+    frameChecks[want] = { framable: r.framable !== false, reason: r.reason || '' };
+    if (customShown !== want || state.view !== 'custom') return;
+    if (frameChecks[want].framable) load(); else blocked(frameChecks[want].reason);
+  });
+}
+function unloadCustom() {
+  const frame = $('#custom-frame');
+  if (frame.getAttribute('src')) frame.removeAttribute('src');
+  frame.onload = null;
+  customShown = '';
+}
+
+// ---------------------------------------------------------------- settings: the Custom tab
+async function loadCustomSettings() {
+  const r = await api('custom');
+  $('#ct-enabled').checked = !!r.enabled;
+  $('#ct-name').value = r.name || 'Custom';
+  $$('input[name="ct-mode"]').forEach((x) => { x.checked = x.value === (r.mode || 'url'); });
+  $('#ct-url').value = r.url || '';
+  $('#ct-file-info').textContent = r.hasFile ? `Uploaded page: ${Math.max(1, Math.ceil(r.fileSize / 1024))} KB` : 'No file uploaded yet.';
+  $('#ct-remove').classList.toggle('hidden', !r.hasFile);
+  renderCustomForm();
+}
+function renderCustomForm() {
+  const on = $('#ct-enabled').checked;
+  const mode = ($('input[name="ct-mode"]:checked') || {}).value || 'url';
+  $('#ct-body').classList.toggle('hidden', !on);
+  $('#ct-url-field').classList.toggle('hidden', mode !== 'url');
+  $('#ct-file-field').classList.toggle('hidden', mode !== 'file');
+}
+$('#ct-enabled').addEventListener('change', async () => { renderCustomForm(); await saveCustomSettings(false); });
+$$('input[name="ct-mode"]').forEach((x) => x.addEventListener('change', renderCustomForm));
+async function saveCustomSettings(say = true) {
+  const r = await api('custom', {
+    method: 'POST',
+    body: { enabled: $('#ct-enabled').checked, name: $('#ct-name').value.trim() || 'Custom', mode: ($('input[name="ct-mode"]:checked') || {}).value || 'url', url: $('#ct-url').value.trim() },
+  });
+  if (say || !r.ok) toast(r.ok ? 'Custom tab saved' : (r.message || 'Could not save'), !r.ok);
+  if (r.ok) { delete frameChecks[r.url]; customShown = ''; refreshStatus(); }
+}
+$('#ct-save').addEventListener('click', () => saveCustomSettings());
+$('#ct-upload').addEventListener('click', () => $('#ct-file').click());
+$('#ct-file').addEventListener('change', async () => {
+  const f = $('#ct-file').files[0];
+  $('#ct-file').value = '';
+  if (!f) return;
+  if (f.size > 5 * 1024 * 1024) { toast('The file is too big (more than 5 MB).', true); return; }
+  const fd = new FormData();
+  fd.append('file', f, f.name);
+  $('#ct-upload').disabled = true;
+  try {
+    const res = await fetch('/api/custom/upload', { method: 'POST', body: fd });
+    const r = await res.json();
+    toast(r.ok ? 'Page uploaded' : (r.message || 'Upload failed'), !r.ok);
+    if (r.ok) { $$('input[name="ct-mode"]').forEach((x) => { x.checked = x.value === 'file'; }); await saveCustomSettings(false); await loadCustomSettings(); }
+  } catch (e) {
+    toast('Upload failed: ' + e.message, true);
+  } finally {
+    $('#ct-upload').disabled = false;
+  }
+});
+$('#ct-remove').addEventListener('click', async () => {
+  if (!(await confirmBox('Remove the uploaded page?', 'The Custom tab shows "set this up" until you upload another file.', 'Remove'))) return;
+  await api('custom/remove', { method: 'POST' });
+  customShown = '';
+  await loadCustomSettings();
+  refreshStatus();
+});
+
 // ---------------------------------------------------------------- settings: screen layout (per browser)
 const LAYOUT_DEFAULT = { share: 70, side: 'right', job: 'under', fit: false };
 function getLayout() {
@@ -1458,5 +1590,6 @@ async function printFile(file) {
   const f = (state.files || []).find((x) => x.file === file);
   if (!f) { toast('The sliced file was not found on the board.', true); return; }
   openPrint(f);
+  if (printCtx) printCtx.from = 'slicer';
 }
 window.FFB = { api, toast, notice, confirmBox, esc, swatch, current, printers, printFile, colorDiff, family, fmtTime, state, refreshStatus };

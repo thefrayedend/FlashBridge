@@ -69,6 +69,17 @@ wifi_password=YourWiFiPassword</pre>
   <div class="tip">AI failure detection, auto clear platform and filament slots are set per printer.</div>
 </section>
 
+<section data-topic="tabs" data-title="The tabs at the top" data-group="Using it">
+  <p>The top bar has a tab for each screen:</p>
+  <table>
+    <tr><td><b>Printer Dashboard</b></td><td>Camera, status, filament, temperatures and controls — the screen described under <a href="#help/screen">The printer screen</a>.</td></tr>
+    <tr><td><b>Printer Preview</b></td><td>The camera as big as the window allows, with the job card (picture, progress, time left, Pause and Stop) beside it when there is room. A print started from the slicer opens this tab.</td></tr>
+    <tr><td><b>Prepare · Paint · Preview</b></td><td>The <a href="#help/slicer">slicer</a> (shown when it is switched on in Settings).</td></tr>
+    <tr><td><b>Custom</b></td><td>Your own page — see <a href="#help/custom">Custom tab</a>. Only there when you switch it on.</td></tr>
+  </table>
+  <p>On narrow screens the tabs show only their icons; the names appear when you hold a finger on one or hover with the mouse.</p>
+</section>
+
 <section data-topic="screen" data-title="The printer screen" data-group="Using it">
   <figure><img src="help/img/home-annotated.jpg" alt="The printer screen with numbered parts" loading="lazy"></figure>
   <table>
@@ -320,6 +331,15 @@ ssh_password=            at least 6 characters</pre>
     <li>The slicer uses at most 3 processor cores, so the printer screens and web pages stay quick. If a plate is too big for the board's memory, the slice stops with a message (the bridge keeps running): put fewer models on that plate or use a larger layer height.</li>
     <li>The engine is the OrcaSlicer engine packaged by Helio Additive (slicer-cli), AGPL-3.0, in a fork with a lean-memory G-code stage for this 4 GB board (the engine's source link below leads to the fork; it names the upstream). The <b>source</b> link is under the slice button.</li>
   </ul>
+</section>
+
+<section data-topic="custom" data-title="Custom tab" data-group="Using it">
+  <p>An extra tab in the top bar with a page of your choice. Switch it on in <b>Settings → General → Custom tab</b>, give it a name (up to 16 characters) and choose what it shows:</p>
+  <table>
+    <tr><td><b>A web address</b></td><td>Any page on the internet or on your home network — a dashboard, another camera, a wiki. Some websites refuse to appear inside another page; the tab then says so and offers <b>Open in a new tab</b>.</td></tr>
+    <tr><td><b>An HTML file</b></td><td>A page you made yourself (up to 5 MB), uploaded to the board. It is kept across updates. You can replace or remove it in Settings.</td></tr>
+  </table>
+  <div class="tip">An uploaded page runs on its own, sealed off from the board: it cannot read printer settings, start prints or change anything. That keeps a page from the internet from doing harm.</div>
 </section>
 
 <section data-topic="layout" data-title="Screen layout" data-group="Using it">

@@ -98,7 +98,102 @@ class SetupServer {
       return;
     }
     if (path.startsWith("/api/")) return await _api(req, path.substring(5));
+    if (path == '/custom/' || path == '/custom/index.html') return await _customFile(req);
     return _static(req, path);
+  }
+
+  // ------------------------------------------------------------------ the "Custom" tab
+  File get _customHtml => File('${host.dataRoot}/custom/index.html');
+
+  /// The user's own HTML page, shown in a sandboxed frame (no access to the board's API):
+  /// the page sets the sandbox on the frame, and the file is sent with the same rule as a
+  /// header so it cannot be opened with more rights by a direct visit either.
+  Future<void> _customFile(HttpRequest req) async {
+    final f = _customHtml;
+    if (!f.existsSync()) return await _json(req, {'error': 'No custom page has been uploaded.'}, status: 404);
+    req.response.headers
+      ..set('Content-Type', 'text/html; charset=utf-8')
+      ..set('Content-Security-Policy', 'sandbox allow-scripts allow-forms allow-popups')
+      ..set('Cache-Control', 'no-cache');
+    await req.response.addStream(f.openRead());
+    await req.response.close();
+  }
+
+  Map<String, dynamic> _customJson() => {
+        ...pi.customTab.toJson(),
+        'hasFile': _customHtml.existsSync(),
+        'fileSize': _customHtml.existsSync() ? _customHtml.lengthSync() : 0,
+        'fileModified': _customHtml.existsSync() ? _customHtml.lastModifiedSync().millisecondsSinceEpoch ~/ 1000 : 0,
+      };
+
+  Future<Map<String, dynamic>> _saveCustom(Map<String, dynamic> b) async {
+    final c = pi.customTab;
+    if (b['enabled'] is bool) c.enabled = b['enabled'];
+    if (b['name'] is String) c.name = CustomTab.cleanName(b['name']);
+    if (b['mode'] == 'url' || b['mode'] == 'file') c.mode = b['mode'];
+    if (b['url'] is String) {
+      final u = (b['url'] as String).trim();
+      if (u.isNotEmpty && CustomTab.cleanUrl(u).isEmpty) return {'ok': false, 'message': 'The web address must start with http:// or https://.'};
+      c.url = CustomTab.cleanUrl(u);
+    }
+    pi.save();
+    return {'ok': true, ..._customJson()};
+  }
+
+  static const _customMaxBytes = 5 * 1024 * 1024;
+
+  Future<Map<String, dynamic>> _uploadCustom(HttpRequest req) async {
+    final boundary = req.headers.contentType?.parameters['boundary'];
+    if (boundary == null) return {'ok': false, 'message': 'Expected a file upload.'};
+    final dir = _customHtml.parent..createSync(recursive: true);
+    final tmp = File('${dir.path}/upload_${DateTime.now().microsecondsSinceEpoch}.tmp');
+    try {
+      final mp = await parseMultipart(req, boundary, tmp);
+      if (mp.file == null || !tmp.existsSync()) return {'ok': false, 'message': 'No file received.'};
+      final name = (mp.fileName ?? '').toLowerCase();
+      if (!(name.endsWith('.html') || name.endsWith('.htm'))) return {'ok': false, 'message': 'Choose an HTML file (.html).'};
+      if (tmp.lengthSync() > _customMaxBytes) return {'ok': false, 'message': 'The file is too big (more than 5 MB).'};
+      if (tmp.lengthSync() == 0) return {'ok': false, 'message': 'The file is empty.'};
+      if (_customHtml.existsSync()) _customHtml.deleteSync();
+      tmp.renameSync(_customHtml.path);
+      pi.customTab.mode = 'file';
+      pi.save();
+      host.log.info('Custom tab: HTML page uploaded (${_customHtml.lengthSync()} bytes)');
+      return {'ok': true, 'message': 'Page uploaded.', ..._customJson()};
+    } finally {
+      if (tmp.existsSync()) tmp.deleteSync();
+    }
+  }
+
+  Map<String, dynamic> _removeCustom() {
+    if (_customHtml.existsSync()) _customHtml.deleteSync();
+    return {'ok': true, ..._customJson()};
+  }
+
+  /// Does the site at [url] allow being shown inside another page? Many refuse (X-Frame-Options,
+  /// CSP frame-ancestors); the page then shows a message and an "open in a new tab" button
+  /// instead of a blank frame. Unknown (no answer, odd address) counts as allowed.
+  Future<Map<String, dynamic>> _checkFrame(String url, HttpRequest req) async {
+    final clean = CustomTab.cleanUrl(url);
+    if (clean.isEmpty) return {'ok': false, 'framable': false, 'reason': 'The web address must start with http:// or https://.'};
+    final target = Uri.parse(clean);
+    // the board's own pages (this server answers "same origin only", which the page is)
+    final self = req.headers.host != null && target.host.toLowerCase() == req.headers.host!.toLowerCase() && target.port == (req.headers.port ?? port);
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 6);
+    try {
+      final r = await client.getUrl(target).then((q) => q.close()).timeout(const Duration(seconds: 8));
+      final xfo = (r.headers.value('x-frame-options') ?? '').toLowerCase();
+      final csp = (r.headers.value('content-security-policy') ?? '').toLowerCase();
+      var blocked = xfo.contains('deny') || (xfo.contains('sameorigin') && !self);
+      final fa = RegExp(r'frame-ancestors([^;]*)').firstMatch(csp);
+      if (fa != null && !fa.group(1)!.contains('*') && !(self && fa.group(1)!.contains("'self'"))) blocked = true;
+      unawaited(r.drain<void>().catchError((_) {}));
+      return {'ok': true, 'framable': !blocked, 'status': r.statusCode, 'reason': blocked ? 'This site does not allow being shown inside another page.' : ''};
+    } catch (e) {
+      return {'ok': true, 'framable': true, 'unknown': true, 'reason': 'Could not check the site: $e'};
+    } finally {
+      client.close(force: true);
+    }
   }
 
   static const _types = {
@@ -180,6 +275,13 @@ class SetupServer {
           return await req.response.close();
         }
       }
+
+      // the Custom tab (Settings -> General -> Custom tab)
+      if (p == 'custom' && m == 'GET') return await _json(req, _customJson());
+      if (p == 'custom' && m == 'POST') return await _json(req, await _saveCustom(await _body(req)));
+      if (p == 'custom/upload' && m == 'POST') return await _json(req, await _uploadCustom(req));
+      if (p == 'custom/remove' && m == 'POST') return await _json(req, _removeCustom());
+      if (p == 'custom/check' && m == 'GET') return await _json(req, await _checkFrame(req.uri.queryParameters['url'] ?? '', req));
 
       // integrations (same settings as the TV app's Settings page)
       if (p == 'settings' && m == 'GET') return await _json(req, _settingsJson());
@@ -423,6 +525,8 @@ class SetupServer {
         'aiEnabled': pi.ai.enabled,
         'update': {'available': updater?.available ?? false, 'latest': updater?.latest?['version']},
         'slicer': {'enabled': pi.slicerEnabled && slicer != null, 'installed': slicer?.installed ?? false},
+        // the optional Custom tab (added field; the page builds the tab from this)
+        'customTab': {'enabled': pi.customTab.enabled, 'name': pi.customTab.name, 'mode': pi.customTab.mode, 'url': pi.customTab.url, 'hasFile': _customHtml.existsSync()},
       };
 
   Future<Map<String, dynamic>> _testPrinter(Map<String, dynamic> b) async {

@@ -49,9 +49,44 @@ class AiSettings {
       };
 }
 
+/// The optional "Custom" tab in the web page: a web address or an HTML file the user uploaded
+/// (kept at <data>/custom/index.html), shown in a frame under the top bar.
+class CustomTab {
+  bool enabled = false;
+  String name = 'Custom';
+  String mode = 'url'; // 'url' | 'file'
+  String url = '';
+
+  CustomTab();
+
+  factory CustomTab.fromJson(Map<String, dynamic> j) => CustomTab()
+    ..enabled = j['enabled'] == true
+    ..name = cleanName(j['name']?.toString() ?? 'Custom')
+    ..mode = j['mode'] == 'file' ? 'file' : 'url'
+    ..url = cleanUrl(j['url']?.toString() ?? '');
+
+  Map<String, dynamic> toJson() => {'enabled': enabled, 'name': name, 'mode': mode, 'url': url};
+
+  /// 1-16 printable characters; empty -> "Custom".
+  static String cleanName(String n) {
+    final t = n.replaceAll(RegExp(r'[\x00-\x1f<>]'), '').trim();
+    final c = t.length > 16 ? t.substring(0, 16).trim() : t;
+    return c.isEmpty ? 'Custom' : c;
+  }
+
+  /// Only http(s) addresses; anything else -> empty.
+  static String cleanUrl(String u) {
+    final t = u.trim();
+    final uri = Uri.tryParse(t);
+    if (uri == null || !(uri.scheme == 'http' || uri.scheme == 'https') || uri.host.isEmpty) return '';
+    return t;
+  }
+}
+
 class PiConfig {
   final File _file;
   AiSettings ai = AiSettings();
+  CustomTab customTab = CustomTab();
 
   /// Optional password for the setup page (empty = open on the local network).
   String setupPassword = '';
@@ -69,13 +104,14 @@ class PiConfig {
       ai = AiSettings.fromJson(Map<String, dynamic>.from(j['ai'] as Map? ?? {}));
       setupPassword = j['setupPassword'] ?? '';
       slicerEnabled = j['slicerEnabled'] ?? true;
+      customTab = CustomTab.fromJson(Map<String, dynamic>.from(j['customTab'] as Map? ?? {}));
     } catch (_) {}
   }
 
   void save() {
     _file.parent.createSync(recursive: true);
     final tmp = File('${_file.path}.tmp');
-    tmp.writeAsStringSync(const JsonEncoder.withIndent('  ').convert({'ai': ai.toJson(), 'setupPassword': setupPassword, 'slicerEnabled': slicerEnabled}));
+    tmp.writeAsStringSync(const JsonEncoder.withIndent('  ').convert({'ai': ai.toJson(), 'setupPassword': setupPassword, 'slicerEnabled': slicerEnabled, 'customTab': customTab.toJson()}));
     tmp.renameSync(_file.path);
   }
 }

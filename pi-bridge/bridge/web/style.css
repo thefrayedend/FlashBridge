@@ -237,6 +237,13 @@ input[type=checkbox], input[type=radio] { width: auto; }
    at normal size (app.js sets cam-badges-off otherwise: they are the first thing to go). */
 .cam-only .cam-top { justify-content: flex-start; }
 .cam-badges-off .cam-top { display: none; }
+/* The Printer Preview tab: the Camera-only layout without the two window buttons */
+.preview-tab .cam-bottom { display: none !important; }
+
+/* ------------------------------------------------------------ the Custom tab (a page in a frame) */
+.in-custom main { max-width: none; padding: 0; }
+#custom-frame { display: block; width: 100%; height: calc(100vh - var(--topbar-h, 59px)); height: calc(100dvh - var(--topbar-h, 59px)); border: 0; background: var(--panel); }
+#view-custom .welcome { margin-top: 48px; }
 
 .job { display: grid; grid-template-columns: 88px minmax(0, 1fr) auto; gap: 14px; align-items: center; }
 .job-thumb { width: 88px; height: 88px; border-radius: 10px; background: var(--panel-2); object-fit: contain; }
@@ -428,6 +435,14 @@ dialog.small-dialog { width: min(400px, calc(100% - 24px)); }
 .mode-tabs a.active { background: var(--panel); color: var(--text); box-shadow: 0 1px 3px rgba(0, 0, 0, .12); }
 .mode-tabs a.active svg { color: var(--primary); }
 @media (max-width: 1100px) { .mode-tabs a span { display: none; } .mode-tabs a { padding: 6px 9px; } }
+@media (max-width: 560px) {
+  .mode-tabs { gap: 0; padding: 2px; }
+  .mode-tabs a { padding: 6px 6px; }
+  /* six icon tabs leave no room for the printer's name and status: the bar wraps, the tabs go on a
+     second row (app.js measures the bar's height into --topbar-h for the screens that need it) */
+  .topbar { flex-wrap: wrap; row-gap: 6px; }
+  .printer-tabs { min-width: 140px; }
+}
 
 /* ------------------------------------------------------------ slicer */
 .in-slicer main { max-width: none; padding-bottom: 12px; }
