@@ -18,6 +18,8 @@ docker run --rm -v "$PACK_DIR:/pack:ro" -v "$W:/w:ro" debian:bullseye-slim bash 
   time $E --list-presets --printer "Flashforge Creator 5 Pro 0.4 nozzle" > /tmp/presets.json
   grep -q "0.20mm Standard @FF C5" /tmp/presets.json || { echo "Creator 5 Pro presets missing"; exit 1; }
   if grep -q "Bambu Lab" /tmp/presets.json; then echo "non-Flashforge printer profiles left in the pack"; exit 1; fi
+  # current OrcaSlicer profiles (update-profiles.sh), not the engine'"'"'s own older ones
+  grep -q "Flashforge PLA Matte @FF C5P" /tmp/presets.json || { echo "the pack still has the engine'"'"'s old Flashforge profiles"; exit 1; }
   cp /w/cube.3mf /tmp/cube.3mf
   mkdir -p /tmp/out
   time $E /tmp/cube.3mf --printer-preset "Flashforge Creator 5 Pro 0.4 nozzle" --process-preset "0.20mm Standard @FF C5" \
@@ -29,6 +31,7 @@ docker run --rm -v "$PACK_DIR:/pack:ro" -v "$W:/w:ro" debian:bullseye-slim bash 
   T1=$(grep -c "^T1" $G || true)
   echo "G-code: $(wc -c < $G) bytes, $(grep -c "^T" $G) tool changes ($T1 to the second head)"
   [ "$T1" -gt 0 ] || { echo "the painted / second-filament part was not printed with the second head"; exit 1; }
+  grep -q "^; filament_multitool_ramming = 1" $G || { echo "no tool-change ramming (OrcaSlicer 2.5 profiles have it on)"; exit 1; }
   [ -s /tmp/out/plate.gcode.3mf ] || { echo "no sliced project (.gcode.3mf) written"; exit 1; }
   echo "slicer pack OK on bullseye"
 '

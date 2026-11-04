@@ -13,6 +13,8 @@
 # Debug symbols and unused libraries are stripped (identical G-code, ~25% smaller).
 # Only the Flashforge printer profiles (plus Orca's generic filament library they build on)
 # are kept: the slicer can only ever pick Flashforge profiles, and the engine starts ~6x faster.
+# Those profiles are replaced with current OrcaSlicer's (update-profiles.sh: same settings as
+# OrcaSlicer 2.5 on a PC).
 set -euo pipefail
 
 # Our fork of Helio's slicer-cli (same OrcaSlicer 2.4.2 engine, pin 8500fcd) with "lean mode":
@@ -23,6 +25,9 @@ ENGINE_VERSION="v0.1.0-dev-19-ffb1"
 ENGINE_REPO="https://github.com/thefrayedend/slicer-cli"
 ENGINE_URL="${ENGINE_REPO}/releases/download/slicer-cli/${ENGINE_VERSION}/slicer-cli-${ENGINE_VERSION}-linux-arm64.tar.gz"
 ENGINE_SHA256="efe2b76ec46efd15f559bfa58353e13dd1a4442e4f81ebfccfbf69514ac61f36"
+# The pack's version: the engine plus the profile set. A board installs a pack whose version
+# differs from its own, and keys its cached preset lists by it, so change it with the profiles.
+PACK_VERSION="${ENGINE_VERSION}-p250b"
 # Where the board unpacks it (the bridge's data folder). The loader path is baked into the program.
 INSTALL_DIR="/var/lib/ffbridge/slicer/engine"
 
@@ -60,6 +65,7 @@ find "$P" -mindepth 1 -maxdepth 1 -print0 | while IFS= read -r -d '' f; do
   esac
 done
 ls "$P"
+bash "$(dirname "$0")/update-profiles.sh" "$E"
 
 echo "== strip what a command-line slicer does not need"
 # Debug symbols (~25 MB) and libraries the engine program never loads (model formats other
@@ -81,12 +87,12 @@ cp /usr/share/doc/libc6/copyright "$E/rt/GLIBC-COPYRIGHT.txt" 2>/dev/null || tru
 patchelf --set-interpreter "$INSTALL_DIR/rt/ld-linux-aarch64.so.1" "$E/bin/slicer_cli-orcaslicer"
 cat > "$E/FFBRIDGE.txt" <<EOF
 OrcaSlicer engine for FlashForge Bridge
-Engine: slicer-cli $ENGINE_VERSION (OrcaSlicer 2.4 engine), AGPL-3.0-or-later. A fork of Helio Additive's
+Engine: slicer-cli $ENGINE_VERSION (OrcaSlicer 2.4 engine), AGPL-3.0-or-later. Pack $PACK_VERSION. A fork of Helio Additive's
 slicer-cli with a lean-memory G-code processor (override file libslic3r/orcaslicer/libslic3r/GCode/GCodeProcessor.cpp).
 Source: $ENGINE_REPO  (upstream: https://github.com/Helio-Additive/slicer-cli; this pack: trimmed to Flashforge profiles,
-program loader set to $INSTALL_DIR/rt, C library from Ubuntu 24.04 in rt/ - LGPL, see rt/GLIBC-COPYRIGHT.txt)
+Flashforge profiles from OrcaSlicer 2.5.0-beta (AGPL-3.0), program loader set to $INSTALL_DIR/rt, C library from Ubuntu 24.04 in rt/ - LGPL, see rt/GLIBC-COPYRIGHT.txt)
 EOF
-echo "$ENGINE_VERSION" > "$E/VERSION"
+echo "$PACK_VERSION" > "$E/VERSION"
 
 echo "== pack"
 tar -C "$E" -czf "$OUT/ffbridge-slicer-arm64.tar.gz" .
@@ -94,6 +100,6 @@ SHA="$(sha256sum "$OUT/ffbridge-slicer-arm64.tar.gz" | cut -d' ' -f1)"
 SIZE="$(stat -c %s "$OUT/ffbridge-slicer-arm64.tar.gz")"
 UNPACKED="$(du -sb "$E" | cut -f1)"
 cat > "$OUT/ffbridge-slicer.json" <<EOF
-{"engine": "$ENGINE_VERSION", "file": "ffbridge-slicer-arm64.tar.gz", "sha256": "$SHA", "size": $SIZE, "unpacked": $UNPACKED}
+{"engine": "$PACK_VERSION", "file": "ffbridge-slicer-arm64.tar.gz", "sha256": "$SHA", "size": $SIZE, "unpacked": $UNPACKED}
 EOF
 cat "$OUT/ffbridge-slicer.json"

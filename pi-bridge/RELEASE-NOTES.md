@@ -19,6 +19,7 @@ setup page, Spoolman, Discord, and AI print-failure detection (Obico model, runs
 
 ## What's new
 
+- The built-in slicer uses OrcaSlicer 2.5's Flashforge profiles, so the same choices give the same settings as OrcaSlicer on a PC (smoother colour changes on the Creator 5, the 0.25 mm nozzle, the Adventurer A5), and the prime tower now goes beside your model like in OrcaSlicer.
 - **Phone app: double-tap the Models tab** to close the open model site and pick another (you stay logged in).
 - **Camera only on a wide screen:** the picture moves to the left and the job card (progress, time left, Pause and Stop, the window buttons) takes the black space beside it; the picture itself never shrinks. Status badges hide when there isn't room.
 - **Camera only on a wide screen now shows the job card beside the picture** (progress, time left, Pause and Stop) when there is room; the picture itself never shrinks.

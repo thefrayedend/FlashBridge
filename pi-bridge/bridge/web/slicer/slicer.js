@@ -1883,7 +1883,8 @@ function paintHashes(o) {
 /**
  * A free spot for the prime tower (purge block for colour changes) on plate i, from the models'
  * real outline on the bed (not their bounding box: round models leave the corners free).
- * Corners first, then anywhere; the deepest tower room that fits wins. Plate coordinates of the
+ * Like OrcaSlicer, whose arrange packs the tower in beside the models: the free spot nearest the
+ * models wins, right of them first, then left, then behind / in front. Plate coordinates of the
  * tower's front-left corner, inside its brim. free: false when nothing fits.
  */
 function towerSpot(i, tools = 2) {
@@ -1891,6 +1892,7 @@ function towerSpot(i, tools = 2) {
   const nx = Math.ceil(b.w / G), ny = Math.ceil(b.d / G);
   const occ = new Uint8Array(nx * ny);
   const v = new THREE.Vector3();
+  let mx0 = Infinity, my0 = Infinity, mx1 = -Infinity, my1 = -Infinity; // the models' footprint
   for (const o of platesObjects(i)) {
     const pos = o.mesh.geometry.attributes.position.array, m = o.mesh.matrixWorld;
     for (let t = 0; t < pos.length; t += 9) {
@@ -1903,6 +1905,7 @@ function towerSpot(i, tools = 2) {
       const i0 = Math.max(0, Math.floor(x0 / G)), i1 = Math.min(nx - 1, Math.floor(x1 / G));
       const j0 = Math.max(0, Math.floor(y0 / G)), j1 = Math.min(ny - 1, Math.floor(y1 / G));
       for (let j = j0; j <= j1; j++) occ.fill(1, j * nx + i0, j * nx + i1 + 1);
+      if (x0 < mx0) mx0 = x0; if (x1 > mx1) mx1 = x1; if (y0 < my0) my0 = y0; if (y1 > my1) my1 = y1;
     }
   }
   // How much room the tower takes (measured with the engine): its core is prime_tower_width wide and
@@ -1929,16 +1932,27 @@ function towerSpot(i, tools = 2) {
       return true;
     };
     const spots = [];
+    const mcy = (my0 + my1) / 2;
     for (let x = edge; x <= b.w - edge - W; x += G) for (let y = edge; y <= b.d - edge - D; y += G) {
-      const dc = Math.min(Math.hypot(x - edge, y - edge), Math.hypot(b.w - edge - W - x, y - edge), Math.hypot(x - edge, b.d - edge - D - y), Math.hypot(b.w - edge - W - x, b.d - edge - D - y));
-      spots.push([dc, x, y]);
+      spots.push([towerScore(x, y, W, D, mx0, my0, mx1, my1, mcy), x, y]);
     }
-    spots.sort((p, q) => p[0] - q[0]); // corners first
+    spots.sort((p, q) => p[0] - q[0]); // nearest the models, right side first
     for (const [, x, y] of spots) {
       if (freeAt(x, y)) return { x: +(b.x0 + x + pad).toFixed(1), y: +(b.y0 + y + pad).toFixed(1), free: true, wall: wall === current ? null : wall };
     }
   }
   return { x: 0, y: 0, free: false, wall: null };
+}
+/**
+ * How good a tower spot is (lower = better): its distance from the models' footprint, plus a step
+ * for the side (right of the models 0, left 25, behind / in front 50), plus a little for being
+ * off the models' middle front-to-back. x, y, W, D: the tower with its brim; m*: the models.
+ */
+function towerScore(x, y, W, D, mx0, my0, mx1, my1, mcy) {
+  if (!Number.isFinite(mx0)) return 0;
+  const dx = Math.max(mx0 - (x + W), x - mx1, 0), dy = Math.max(my0 - (y + D), y - my1, 0);
+  const side = x >= mx1 ? 0 : x + W <= mx0 ? 25 : 50;
+  return Math.hypot(dx, dy) + side + 0.2 * Math.abs(y + D / 2 - mcy);
 }
 /** Project filament number for each tool of plate i's slice (tool t -> fil[t]). */
 function toolFilaments(i) { return (S.res[i] && S.res[i].tools) || S.filaments.map((_, k) => k + 1); }
