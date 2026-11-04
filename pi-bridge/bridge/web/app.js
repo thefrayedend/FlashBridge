@@ -111,7 +111,7 @@ function route() {
   if (state.view === 'slicer') loadSlicer().then((m) => m && m.show(mode));
   else if (slicerMod) slicerMod.hide();
   if (state.view === 'settings') {
-    if (state.tab === 'general') { loadSettings(); renderLayoutForm(); loadSlicerSettings(); loadCustomSettings(); }
+    if (state.tab === 'general') { loadSettings(); renderLayoutForm(); loadSlicerSettings(); if (!inPhoneApp) loadCustomSettings(); }
     if (state.tab === 'network') loadNetwork(true);
     if (state.tab === 'advanced') {
       if (state.sub === 'printers') renderPrinterList();
@@ -144,7 +144,13 @@ function showModeTabs() {
   $('#tab-custom-name').textContent = ct.name || 'Custom';
   $('#tab-custom').title = ct.name || 'Custom';
 }
-const customTab = () => (state.status && state.status.customTab) || { enabled: false, name: 'Custom', mode: 'url', url: '', hasFile: false };
+// The phone app's board web view says "FlashBridgeApp" in its user agent (APP-NOTES): the Custom tab
+// is for normal browsers only, so the app never sees it (nor its Settings section).
+const inPhoneApp = navigator.userAgent.includes('FlashBridgeApp');
+const customTab = () => {
+  const ct = (state.status && state.status.customTab) || { enabled: false, name: 'Custom', mode: 'url', url: '', hasFile: false };
+  return inPhoneApp ? { ...ct, enabled: false } : ct;
+};
 
 // ---------------------------------------------------------------- help
 let helpTopics = null;
@@ -309,24 +315,13 @@ $('#btn-fullscreen').addEventListener('click', () => {
   else if (c.requestFullscreen) c.requestFullscreen();
   else if (cam.webkitEnterFullscreen) cam.webkitEnterFullscreen();
 });
-// "Camera only": the camera fills the window below the top bar (job, filament, temperatures and
-// controls hidden; not the browser's full screen). Remembered per browser; the same button brings
-// everything back. style.css does the layout from the cam-only class on <html>.
-function setCamOnly(on, say = false) {
-  store.set('ffb-cam-only', on ? '1' : '0');
-  const b = $('#btn-cam-only');
-  b.title = on ? 'Show everything' : 'Camera only';
-  b.setAttribute('aria-label', b.title);
-  b.setAttribute('aria-pressed', on ? 'true' : 'false');
-  applyCamMode();
-  if (say) toast(on ? 'Camera only. Tap the same button to show everything again.' : 'Showing everything again.');
-}
-// The Printer Preview tab is the Camera-only layout, always, without the two window buttons; the
-// Dashboard uses the choice saved by its own button.
+// The Printer Preview tab is the printer screen in its "camera only" layout (the camera fills the
+// window below the top bar, the job card beside the picture when it fits, no window buttons). The
+// Dashboard always shows the full page.
 function applyCamMode() {
   const preview = state.view === 'home' && state.home === 'preview';
   document.documentElement.classList.toggle('preview-tab', preview);
-  document.documentElement.classList.toggle('cam-only', preview || store.get('ffb-cam-only', '0') === '1');
+  document.documentElement.classList.toggle('cam-only', preview);
   fitCamOnly();
 }
 // The top bar can be one or two rows (several printers): measure it so the camera uses the rest.
@@ -364,13 +359,7 @@ function fitCamOnly() {
   root.classList.toggle('cam-badges-off', on && !badgesFit);
   if (side !== root.classList.contains('cam-side-job')) {
     root.classList.toggle('cam-side-job', side);
-    if (side) {
-      $('#camera').append($('#job'));
-      $('#job').append($('.cam-bottom')); // the two window buttons go along the bottom of the card
-    } else {
-      $('#camera').append($('.cam-bottom')); // back to the corner of the picture
-      applyLayout();
-    }
+    if (side) $('#camera').append($('#job')); else applyLayout();
   }
   // a short window: leave out the job picture before anything has to scroll (text and buttons stay)
   if (side) {
@@ -379,9 +368,8 @@ function fitCamOnly() {
     if (job.scrollHeight > job.clientHeight + 1) root.classList.add('cam-side-tight');
   } else root.classList.remove('cam-side-tight');
 }
-$('#btn-cam-only').addEventListener('click', () => setCamOnly(!document.documentElement.classList.contains('cam-only'), true));
 window.addEventListener('resize', fitCamOnly);
-setCamOnly(store.get('ffb-cam-only', '0') === '1');
+try { localStorage.removeItem('ffb-cam-only'); } catch (_) {} // the Dashboard's old "Camera only" choice (button removed)
 window.addEventListener('resize', measureTopbar);
 function measureTopbar() { document.documentElement.style.setProperty('--topbar-h', $('.topbar').offsetHeight + 'px'); }
 
@@ -1404,6 +1392,7 @@ function unloadCustom() {
 }
 
 // ---------------------------------------------------------------- settings: the Custom tab
+$('#custom-card').classList.toggle('hidden', inPhoneApp);
 async function loadCustomSettings() {
   const r = await api('custom');
   $('#ct-enabled').checked = !!r.enabled;

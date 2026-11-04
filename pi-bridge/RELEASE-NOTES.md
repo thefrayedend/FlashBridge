@@ -19,6 +19,8 @@ setup page, Spoolman, Discord, and AI print-failure detection (Obico model, runs
 
 ## What's new
 
+- The Camera only button is gone from the Dashboard; use the Printer Preview tab instead.
+- The Custom tab is for browsers only; the phone app does not show it.
 - The Printer tab is now called Printer Dashboard.
 - New Printer Preview tab: the camera with the job card beside it; sending a print from the slicer opens it.
 - Optional Custom tab (Settings): show a web page or your own HTML file.

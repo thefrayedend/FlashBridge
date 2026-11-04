@@ -203,18 +203,16 @@ input[type=checkbox], input[type=radio] { width: auto; }
 .chip .dot { width: 7px; height: 7px; }
 .cam-btn { width: 40px; height: 40px; border-radius: 10px; border: 0; background: rgba(0, 0, 0, .55); color: #fff; display: grid; place-items: center; cursor: pointer; backdrop-filter: blur(6px); }
 .cam-btn.on { background: rgba(255, 196, 0, .9); color: #000; }
-/* "Camera only" (button on the camera, remembered per browser; app.js sets cam-only on <html> and
-   --topbar-h): the camera fills the window below the top bar, keeping the picture's shape (black bars
-   if needed); the job, filament, temperatures and controls are hidden. Banners (errors, AI, waiting
-   file) stay above the camera. Not the browser's full screen - that is the other button. */
+/* The Printer Preview tab (app.js sets cam-only + preview-tab on <html> and --topbar-h): the camera
+   fills the window below the top bar, keeping the picture's shape (black bars if needed); the job,
+   filament, temperatures and controls are hidden. Banners (errors, AI, waiting file) stay above the
+   camera. */
 .cam-only #view-home.active { display: flex; flex-direction: column; height: calc(100vh - var(--topbar-h, 59px) - 32px); height: calc(100dvh - var(--topbar-h, 59px) - 32px); min-height: 200px; }
 .cam-only main { padding-bottom: 16px; }
 .cam-only .printer-view, .cam-only.lo-left .printer-view, .cam-only.lo-fit .printer-view { display: block; flex: 1; min-height: 0; }
 .cam-only .col-main { height: 100%; }
 .cam-only .camera, .cam-only.lo-fit.lo-below .camera { height: 100%; width: 100%; aspect-ratio: auto; margin: 0; }
 .cam-only .col-side, .cam-only #job { display: none; }
-.cam-only .ico-cam-only, .ico-show-all { display: none; }
-.cam-only .ico-show-all { display: block; }
 /* Camera only on a wide window: the picture slides to the left edge and the job card fills the black
    right of it from top to bottom (app.js sets cam-side-job and --cam-strip when all the black beside
    the picture is wide enough for the card at normal size; the picture itself keeps its full size). Stacked top to bottom: picture, name, progress, then Pause / Stop under each other,
@@ -231,13 +229,11 @@ input[type=checkbox], input[type=radio] { width: auto; }
 .cam-side-job #camera .job-title { white-space: normal; overflow-wrap: anywhere; }
 .cam-side-job #camera .job-actions { grid-column: auto; flex-direction: column; }
 .cam-side-job #camera .job-actions .btn { flex: none; width: 100%; }
-.cam-side-job #camera #job .cam-bottom { position: static; margin-top: auto; justify-content: flex-end; }
-.cam-side-job #camera #job .cam-btn { background: var(--panel-2); color: var(--text); border: 1px solid var(--line); backdrop-filter: none; }
 /* Camera only: both badges together on the left, over the black strip - and only when they fit there
    at normal size (app.js sets cam-badges-off otherwise: they are the first thing to go). */
 .cam-only .cam-top { justify-content: flex-start; }
 .cam-badges-off .cam-top { display: none; }
-/* The Printer Preview tab: the Camera-only layout without the two window buttons */
+/* no full-screen button in the Printer Preview tab */
 .preview-tab .cam-bottom { display: none !important; }
 
 /* ------------------------------------------------------------ the Custom tab (a page in a frame) */
