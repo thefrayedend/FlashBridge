@@ -58,7 +58,7 @@ Future<List<FoundBoard>> findBoards({Duration timeout = const Duration(seconds: 
   return found.values.toList();
 }
 
-/// The IP address of a name like "creator5.local" (null when nobody answers).
+/// The IP address of a name like "flashbridge.local" (null when nobody answers).
 Future<String?> resolveLocal(String host, {Duration timeout = const Duration(seconds: 3)}) async {
   final name = host.endsWith('.local') ? host : '$host.local';
   final client = _client();

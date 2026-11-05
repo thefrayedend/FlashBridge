@@ -39,7 +39,7 @@ class MainActivity : FlutterActivity() {
                 "getSettings" -> result.success(
                     mapOf(
                         "board" to (prefs.getString("board", "") ?: ""),
-                        "host" to (prefs.getString("host", "creator5.local") ?: "creator5.local"),
+                        "host" to (prefs.getString("host", "flashbridge.local") ?: "flashbridge.local"),
                         "watch" to prefs.getBoolean("watch", false),
                         "autoUpdate" to prefs.getBoolean("autoUpdate", true),
                     )

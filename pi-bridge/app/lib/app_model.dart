@@ -12,8 +12,8 @@ class Busy {
 }
 
 class AppModel extends ChangeNotifier {
-  /// What the user typed (or the default): a name like creator5.local or an address.
-  String host = 'creator5.local';
+  /// What the user typed (or the default): a name like flashbridge.local or an address.
+  String host = 'flashbridge.local';
 
   /// The address the app uses, e.g. http://192.168.1.50 (empty until the board was found once).
   String boardUrl = '';
@@ -31,7 +31,7 @@ class AppModel extends ChangeNotifier {
 
   Future<void> load() async {
     final s = await Native.getSettings();
-    host = '${s['host'] ?? ''}'.trim().isEmpty ? 'creator5.local' : '${s['host']}'.trim();
+    host = '${s['host'] ?? ''}'.trim().isEmpty ? 'flashbridge.local' : '${s['host']}'.trim();
     boardUrl = '${s['board'] ?? ''}';
     watch = s['watch'] == true;
     notifyListeners();

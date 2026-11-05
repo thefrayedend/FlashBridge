@@ -88,7 +88,7 @@ class _SettingsViewState extends State<SettingsView> {
             TextField(
               controller: _host,
               keyboardType: TextInputType.url,
-              decoration: const InputDecoration(labelText: 'Board name or address', hintText: 'creator5.local or 192.168.1.50', border: OutlineInputBorder()),
+              decoration: const InputDecoration(labelText: 'Board name or address', hintText: 'flashbridge.local or 192.168.1.50', border: OutlineInputBorder()),
               onSubmitted: (v) => app.setHost(v),
             ),
             const SizedBox(height: 12),
