@@ -162,12 +162,12 @@ class MjpegRelay {
     var lastSent = DateTime.fromMillisecondsSinceEpoch(0);
     try {
       if (latest != null) {
-        res.add(_part(boundary, latest!));
+        _part(res, boundary, latest!);
       }
       await for (final f in ctrl.stream) {
         if (maxFps > 0 && DateTime.now().difference(lastSent).inMilliseconds < 1000 ~/ maxFps) continue;
         lastSent = DateTime.now();
-        res.add(_part(boundary, f));
+        _part(res, boundary, f);
         await res.flush();
       }
     } catch (_) {
@@ -182,9 +182,13 @@ class MjpegRelay {
     }
   }
 
-  List<int> _part(String boundary, Uint8List jpeg) {
-    final head = '--$boundary\r\nContent-Type: image/jpeg\r\nContent-Length: ${jpeg.length}\r\n\r\n'.codeUnits;
-    return [...head, ...jpeg, 13, 10];
+  /// Writes one multipart frame. The frame bytes go to the socket as they are: building one
+  /// List<int> per frame (head + frame + tail) used to allocate ~8 bytes per picture byte, i.e.
+  /// hundreds of KB of garbage per frame per viewer, for nothing.
+  void _part(HttpResponse res, String boundary, Uint8List jpeg) {
+    res.add('--$boundary\r\nContent-Type: image/jpeg\r\nContent-Length: ${jpeg.length}\r\n\r\n'.codeUnits);
+    res.add(jpeg);
+    res.add(const [13, 10]);
   }
 
   void dispose() {

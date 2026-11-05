@@ -1,0 +1,11 @@
+{
+  "ai": {
+    "enabled": true,
+    "action": "notify",
+    "sensitivity": "medium",
+    "intervalSeconds": 10,
+    "disabledPrinters": []
+  },
+  "setupPassword": "",
+  "slicerEnabled": true
+}

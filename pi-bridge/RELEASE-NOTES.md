@@ -19,6 +19,7 @@ setup page, Spoolman, Discord, and AI print-failure detection (Obico model, runs
 
 ## What's new
 
+- The board watches its own health: throttling and power readings in the black box, and a hardware watchdog restarts a hung box by itself (the print is never affected).
 - After a crash the board now keeps its system log and a minute-by-minute record (Settings → Advanced → System → What happened), so the cause can be found.
 - Pressing Settings now checks for an update; if there is one, a box offers to install it.
 - The Custom tab's uploaded HTML file can be up to 100 MB.

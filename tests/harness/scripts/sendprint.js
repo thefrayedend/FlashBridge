@@ -1,0 +1,21 @@
+const { chromium } = require('playwright'); const S = process.argv[2];
+(async () => { const b = await chromium.launch({ executablePath: process.env.CHROMIUM || undefined, args: ['--use-angle=swiftshader','--enable-unsafe-swiftshader','--ignore-gpu-blocklist'] }); const p = await b.newPage({ viewport: { width: 1300, height: 800 } });
+  p.on('pageerror', e => console.log('PAGEERR', e.message));
+  p.on('console', m => { if (m.type() === 'error') console.log('CONSOLE', m.text().slice(0, 200)); });
+  await p.goto('http://localhost:8088/#slicer/prepare'); await p.waitForTimeout(3500);
+  await p.setInputFiles('#sl-file', [`${S}/models/vase.3mf`]); await p.waitForTimeout(4000);
+  await p.click('#mode-tabs a[data-mode="preview"]');
+  for (let i = 0; i < 120; i++) { await p.waitForTimeout(2000); const st = await p.evaluate(() => fetch('/api/slicer').then(r => r.json()).then(j => j.jobs && j.jobs['1'] && j.jobs['1'].state)); if (st && st !== 'slicing') { console.log('slice', st); break; } }
+  await p.waitForTimeout(6000);
+  const btn = await p.$('[data-sl="print"]'); console.log('print button:', !!btn, btn && await btn.textContent());
+  await btn.click(); await p.waitForTimeout(4000);
+  console.log('dialog open:', await p.evaluate(() => document.querySelector('#print-dialog').open), '| toasts:', JSON.stringify(await p.evaluate(() => [...document.querySelectorAll('.toast')].map((t) => t.textContent.trim()))));
+  console.log('dialog text:', await p.evaluate(() => document.querySelector('#print-dialog').innerText.replace(/\n+/g, ' | ').slice(0, 300)));
+  const vis = await p.evaluate(() => { const d = document.querySelector('#print-dialog'); const r = d.getBoundingClientRect(); const s = getComputedStyle(d); return { w: r.width, h: r.height, display: s.display, vis: s.visibility, z: s.zIndex }; }); console.log('dialog box:', JSON.stringify(vis));
+  await p.click('#pr-start'); await p.waitForTimeout(5000);
+  console.log('after Start: hash', await p.evaluate(() => location.hash), '| dialog open', await p.evaluate(() => document.querySelector('#print-dialog').open), '| toast', JSON.stringify(await p.evaluate(() => [...document.querySelectorAll('.toast')].map((t) => t.textContent.trim()).slice(-1))));
+  console.log('home view shows:', await p.evaluate(() => (document.querySelector('#view-home') || document.body).innerText.replace(/\n+/g, " | ").slice(0, 250)));
+  const logs = await p.evaluate(() => fetch('/api/logs').then(r => r.json()).then(j => j.lines.filter(l => /Print/.test(String(l))).slice(-3)));
+  console.log('board log:', JSON.stringify(logs));
+  await p.screenshot({ path: (process.env.FB_OUT || '/tmp') + '/sendprint.png' });
+  await b.close(); })();

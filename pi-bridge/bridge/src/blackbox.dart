@@ -5,7 +5,7 @@
 // started ("previous boot ended").
 //
 // Each line:
-//   <time> up=<s> temp=<°C> cpu=<cur/max MHz per policy> throttled=<yes|no|?> uv=<power-supply flag|n/a>
+//   <time> up=<s> temp=<°C> cpu=<cur/allowed MHz per policy, '!' = allowed is capped> throttled=<yes|no|?> uv=<power-supply flag|n/a>
 //   load=<1,5,15> memavail=<MB> swapused=<MB> ai=<service>/<per-printer status:inference ms> cam=<viewers>
 //   net=<up|down> printers=<online>/<all>
 import 'dart:async';
@@ -115,8 +115,11 @@ class BlackBox {
       for (final p in pols) {
         final cur = int.tryParse(_read('$p/scaling_cur_freq')), max = int.tryParse(_read('$p/cpuinfo_max_freq'));
         if (cur == null || max == null) continue;
-        clocks.add('${cur ~/ 1000}/${max ~/ 1000}');
-        if (cur < max * 0.75) throttled = true;
+        // An idle core legitimately runs slow, so the current clock says nothing about throttling.
+        // The kernel's thermal/power governors lower scaling_max_freq instead: that is the signal.
+        final cap = int.tryParse(_read('$p/scaling_max_freq')) ?? max;
+        clocks.add('${cur ~/ 1000}/${cap ~/ 1000}${cap < max ? '!' : ''}');
+        if (cap < max) throttled = true;
       }
     } catch (_) {}
     parts.add('cpu=${clocks.isEmpty ? '?' : clocks.join(',')}MHz');

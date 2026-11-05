@@ -1,0 +1,26 @@
+{
+  "printers": [
+    {
+      "id": "p1793241585635",
+      "name": "Creator 5",
+      "ip": "127.0.0.1",
+      "serial": "SNC5TEST01",
+      "checkCode": "12345678",
+      "port": 7125,
+      "levelBeforePrint": false,
+      "autoClearPlatform": true,
+      "cameraUrl": "",
+      "enabled": true,
+      "model": "Creator 5 Pro"
+    }
+  ],
+  "spoolmanUrl": "",
+  "discordWebhook": "",
+  "discordIntervalMinutes": 0,
+  "discordSnapshot": true,
+  "notifyOnComplete": true,
+  "notifyOnError": true,
+  "notifyOnPause": true,
+  "notifyOnStart": true,
+  "mappingMode": "auto"
+}

@@ -47,9 +47,11 @@ jobs:
           dart run test/slicer_check.dart
           dart run test/sentname_check.dart
           dart run test/updater_check.dart
+          dart run test/blackbox_check.dart
           python3 ../image/test/wifi_status_check.py
           python3 ../image/test/update_check.py
           python3 ../image/test/printernet_check.py
+          python3 ../image/test/blackbox_check.py
           dart compile exe bin/pibridge.dart -o "$GITHUB_WORKSPACE/pibridge" \
             -DFFB_VERSION="1.0.${{ github.run_number }}" -DFFB_REPO="${{ github.repository }}" -DFFB_BOARD="raspberrypi-4"
 
