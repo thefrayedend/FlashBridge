@@ -385,6 +385,7 @@ ssh_password=            at least 6 characters</pre>
     <tr><td>OrcaSlicer test fails</td><td>Host type must be Octo/Klipper; address with <code>:7125</code>; no API key.</td></tr>
     <tr><td>AI says “starting” for a long time</td><td>The model loads for about a minute after the board starts. If it stays, restart the board (Advanced → System).</td></tr>
     <tr><td>Red error box on the printer screen</td><td>Follow what it says, then press <b>Clear platform</b> or restart the printer. See <a href="#help/errors">Printer error messages</a>.</td></tr>
+    <tr><td>The board died or stopped answering</td><td>After it is back, open <b>Advanced → System → What happened</b>: it shows when the previous run ended, the board's readings from the minutes before (temperature, memory, AI, camera, network — one line every 30 s) and the warnings from that run. The system log is kept on the SD card now, so a crash no longer wipes it.</td></tr>
     <tr><td>Something else</td><td>Advanced → System → Log shows what happened. Restarting the board fixes most hiccups and doesn't affect running prints.</td></tr>
   </table>
 </section>

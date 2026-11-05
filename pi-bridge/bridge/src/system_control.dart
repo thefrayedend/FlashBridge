@@ -47,6 +47,7 @@ class SystemControl {
   // While the slicer runs the AI service is stopped (it holds up to 1.5 GB and busy CPU cores).
   Future<Map<String, dynamic>> aiPause() => _run(['ai-pause']);
   Future<Map<String, dynamic>> aiResume() => _run(['ai-resume']);
+  Future<Map<String, dynamic>> blackboxSetup() => _run(['blackbox-setup'], timeout: const Duration(seconds: 60));
   Future<Map<String, dynamic>> updateStart(String baseUrl) => _run(['update-start', baseUrl]);
   Future<Map<String, dynamic>> systemInfo() => _run(['system-info']);
   /// Recent service log (also of earlier runs) and kernel out-of-memory events, for troubleshooting.

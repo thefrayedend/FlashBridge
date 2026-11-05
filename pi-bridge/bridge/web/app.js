@@ -1240,6 +1240,8 @@ async function loadSystem() {
     if (info.os) rows.push(['System', info.os]);
     if (info.uptime) rows.push(['Running for', info.uptime]);
     if (info.temp) rows.push(['CPU temperature', info.temp]);
+    if (info.throttled) rows.push(['Slowed down by heat', info.throttled]);
+    if (info.powerSupply) rows.push(['Power supply', info.powerSupply]);
     if (info.memory) rows.push(['Memory', info.memory]);
     if (info.disk) rows.push(['SD card', info.disk]);
   }
@@ -1362,6 +1364,28 @@ async function loadLogs() {
   pre.scrollTop = pre.scrollHeight;
 }
 $('#btn-logs').addEventListener('click', loadLogs);
+// "What happened": the black box (readings every 30 s) and the previous boot's log, for the time
+// after the board died or was unreachable
+$('#btn-diag').addEventListener('click', async (e) => {
+  e.target.disabled = true; e.target.textContent = 'Reading…';
+  const d = await api('system/diag');
+  e.target.disabled = false; e.target.textContent = 'Refresh';
+  const box = $('#diag-box');
+  if (!d || d.ok === false) { box.innerHTML = `<p class="hint">${esc((d && d.message) || 'Not available on this computer.')}</p>`; return; }
+  const block = (title, lines, open = false) => `<details${open ? ' open' : ''}><summary>${esc(title)} (${(lines || []).length})</summary><pre class="logs">${esc((lines || []).join('\n') || '– nothing –')}</pre></details>`;
+  const j = d.journal || {};
+  let h = `<div class="kv"><div>Previous boot ended</div><div>${esc(d.previous_boot_ended ? d.previous_boot_ended.replace('T', ' ') : 'unknown (no readings from before this start)')}</div>`;
+  if (d.cpu && d.cpu.throttled !== undefined) h += `<div>CPU slowed down</div><div>${d.cpu.throttled ? 'yes' : 'no'} (${esc(d.cpu.cpu_mhz || '')} MHz)</div>`;
+  if (j.usage) h += `<div>System log</div><div>${esc(j.usage)}${j.dir ? ' on ' + esc(j.dir) : ''}</div>`;
+  h += '</div>';
+  h += block('Last readings (every 30 s)', d.blackbox, true);
+  h += block('Warnings from the previous boot', d.previous_boot);
+  h += block('Kernel messages from the previous boot', d.previous_boot_kernel);
+  h += block('Out-of-memory events', d.memory_events);
+  h += block('Boots', d.boots);
+  h += block('Bridge and AI service log', d.services);
+  box.innerHTML = h;
+});
 $('#btn-reboot').addEventListener('click', async () => {
   if (!(await confirmBox('Restart the bridge board?', 'Running prints are not affected, but this page is unavailable for about a minute.', 'Restart'))) return;
   const r = await api('system/reboot', { method: 'POST' });

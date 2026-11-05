@@ -9,7 +9,7 @@ Sub-commands used by systemd units:
 
 Sub-commands used by the bridge's setup page (via `sudo ffbridge-helper <cmd>`), all print JSON:
   net-status | wifi-scan | wifi-connect <ssid> (password on stdin) | wifi-forget
-  set-hostname <name> | reboot | shutdown | restart-ai | system-info | diag
+  set-hostname <name> | reboot | shutdown | restart-ai | system-info | diag | blackbox-setup
   printernet-status | printernet-enable <ssid> (password on stdin) | printernet-disable
   printernet-internet <minutes, 0 = block, -1 = until turned off>
 """
@@ -75,7 +75,149 @@ def diag():
         out["slices"] = open("/var/lib/ffbridge/slicer/history.log").read().splitlines()[-40:]
     except OSError:
         out["slices"] = []
+    # the black box: the previous boot's warnings and kernel messages (now that the journal is kept),
+    # the last readings before the box died, and where the journal lives
+    r = run(["journalctl", "-b", "-1", "-p", "warning", "--no-pager", "-o", "short-iso", "-n", "200"], timeout=30)
+    out["previous_boot"] = [l for l in (r.stdout or r.stderr or "").splitlines() if not l.startswith("-- ")][-200:]
+    r = run(["journalctl", "-b", "-1", "-k", "--no-pager", "-o", "short-iso", "-n", "100"], timeout=30)
+    out["previous_boot_kernel"] = [l for l in (r.stdout or r.stderr or "").splitlines() if not l.startswith("-- ")][-100:]
+    r = run(["journalctl", "--list-boots", "--no-pager"], timeout=30)
+    out["boots"] = (r.stdout or "").splitlines()[-6:]
+    tail = blackbox_tail(120)
+    out["blackbox"] = tail
+    out["previous_boot_ended"] = previous_boot_end(blackbox_tail(5000))
+    out["journal"] = {"dir": _mount_source(JOURNAL_MOUNT), "var_log": _mount_source("/var/log"),
+                      "usage": run(["journalctl", "--disk-usage"]).stdout.strip()}
+    out["cpu"] = cpu_state()
     return out
+
+
+# ----------------------------------------------------------------------------- black box
+# After a crash nothing survived: the system journal lived in /var/log, which these images keep in
+# RAM, so every boot started with an empty one. The journal now lives on the SD card (bind-mounted
+# from /var/lib/ffbridge-sys/journal) and the bridge writes a line of readings every 30 s to
+# /var/lib/ffbridge/blackbox.log, so the last minutes before a crash can be read afterwards.
+JOURNAL_DIR = os.path.join(STATE_DIR, "journal")
+JOURNAL_MOUNT = "/var/log/journal"
+JOURNALD_CONF = "/etc/systemd/journald.conf.d/ffbridge.conf"
+JOURNALD_TEXT = ("# FlashForge Bridge: keep the system log across reboots and crashes (on the SD card, see\n"
+                 "# ffsys.py blackbox_setup), at most 200 MB, written out at least every 30 s.\n"
+                 "[Journal]\nStorage=persistent\nSystemMaxUse=200M\nSyncIntervalSec=30s\n")
+
+
+def fstab_line():
+    """Mounts the SD-card folder onto /var/log/journal at boot: after the images' RAM log (if any) has
+    mounted /var/log, and before systemd moves the early boot log into it."""
+    return (f"{JOURNAL_DIR} {JOURNAL_MOUNT} none bind,nofail,x-systemd.after=armbian-ramlog.service,"
+            "x-systemd.after=orangepi-ramlog.service,x-systemd.before=systemd-journal-flush.service 0 0")
+
+BLACKBOX_LOG = "/var/lib/ffbridge/blackbox.log"
+FSTAB_PATH = "/etc/fstab"
+
+
+def _mount_source(path):
+    r = run(["findmnt", "-n", "-o", "SOURCE,FSTYPE", "--target", path])
+    return r.stdout.strip()
+
+
+def blackbox_setup():
+    """Puts the system journal on the SD card (idempotent; called by the bridge at every start, so
+    boards in the field get it with an update, no reflash). Reports what it did."""
+    done = []
+    try:
+        os.makedirs(JOURNAL_DIR, exist_ok=True)
+        run(["chown", "root:systemd-journal", JOURNAL_DIR])
+        os.chmod(JOURNAL_DIR, 0o2755)
+        os.makedirs(JOURNAL_MOUNT, exist_ok=True)
+        changed = False
+        try:
+            fstab = open(FSTAB_PATH).read()
+        except OSError:
+            fstab = ""
+        if f" {JOURNAL_MOUNT} " not in fstab.replace("\t", " "):
+            with open(FSTAB_PATH, "a") as f:
+                f.write(("" if fstab.endswith("\n") or not fstab else "\n") + fstab_line() + "\n")
+            done.append("fstab line added")
+        mounted = run(["findmnt", "-n", "-o", "TARGET", JOURNAL_MOUNT]).stdout.strip() == JOURNAL_MOUNT
+        if not mounted:
+            r = run(["mount", "--bind", JOURNAL_DIR, JOURNAL_MOUNT])
+            if r.returncode != 0:
+                return {"ok": False, "message": f"could not mount the journal folder: {(r.stderr or r.stdout).strip()}"}
+            done.append("journal folder mounted")
+            changed = True
+        try:
+            cur = open(JOURNALD_CONF).read()
+        except OSError:
+            cur = ""
+        if cur != JOURNALD_TEXT:
+            os.makedirs(os.path.dirname(JOURNALD_CONF), exist_ok=True)
+            with open(JOURNALD_CONF, "w") as f:
+                f.write(JOURNALD_TEXT)
+            done.append("journald settings written")
+            changed = True
+        if changed:
+            # journald must reopen its files in the new place; stream connections survive a restart
+            # on systemd 246+ (these images have 249+)
+            r = run(["systemctl", "restart", "systemd-journald"], timeout=30)
+            done.append("journald restarted" if r.returncode == 0 else f"journald restart failed: {(r.stderr or '').strip()}")
+        usage = run(["journalctl", "--disk-usage"]).stdout.strip()
+        return {"ok": True, "message": ("; ".join(done) if done else "journal already on the SD card") + (f" ({usage})" if usage else ""),
+                "journal": _mount_source(JOURNAL_MOUNT), "var_log": _mount_source("/var/log")}
+    except Exception as e:  # noqa: BLE001 - report, never break the bridge start
+        return {"ok": False, "message": f"black box not set up: {e}"}
+
+
+def blackbox_tail(n=120):
+    """The last n lines of readings, across the current and the rotated file."""
+    lines = []
+    for path in (BLACKBOX_LOG + ".1", BLACKBOX_LOG):
+        try:
+            lines += open(path, errors="replace").read().splitlines()
+        except OSError:
+            pass
+    return lines[-n:]
+
+
+def previous_boot_end(lines):
+    """Time of the last reading before the bridge last started (= roughly when the box died or was
+    switched off), from the "=== bridge start" markers the bridge writes."""
+    last = None
+    for i, l in enumerate(lines):
+        if l.startswith("=== bridge start") and i > 0 and not lines[i - 1].startswith("==="):
+            last = lines[i - 1].split(" ", 1)[0]
+    return last
+
+
+def cpu_state():
+    """Clock and throttling, best effort: current vs maximum frequency of every cpufreq policy, and
+    the Raspberry Pi firmware's under-voltage / throttle flags where the SoC has them."""
+    st = {}
+    try:
+        pols = []
+        base = "/sys/devices/system/cpu/cpufreq"
+        for name in sorted(os.listdir(base)) if os.path.isdir(base) else []:
+            try:
+                cur = int(open(f"{base}/{name}/scaling_cur_freq").read()) // 1000
+                mx = int(open(f"{base}/{name}/cpuinfo_max_freq").read()) // 1000
+                pols.append((cur, mx))
+            except (OSError, ValueError):
+                pass
+        if pols:
+            st["cpu_mhz"] = "/".join(f"{c}of{m}" for c, m in pols)
+            st["throttled"] = any(c < m * 0.75 for c, m in pols)
+    except OSError:
+        pass
+    for path in ("/sys/devices/platform/soc/soc:firmware/get_throttled", "/sys/devices/platform/soc/firmware/get_throttled"):
+        try:
+            v = int(open(path).read().strip(), 16)
+            st["undervoltage_now"] = bool(v & 0x1)
+            st["undervoltage_occurred"] = bool(v & 0x10000)
+            st["firmware_throttled_now"] = bool(v & 0x4)
+            st["firmware_throttled_occurred"] = bool(v & 0x40000)
+            break
+        except (OSError, ValueError):
+            pass
+    return st
 
 
 def zram_setup():
@@ -1189,6 +1331,12 @@ def system_info():
             pass
     if temps:
         info["temp"] = f"{max(temps):.0f} °C"
+    cpu = cpu_state()
+    if "throttled" in cpu:
+        info["throttled"] = ("yes (slowed down to protect itself)" if cpu["throttled"] else "no") + f" — {cpu['cpu_mhz']} MHz"
+    if "undervoltage_now" in cpu:
+        info["powerSupply"] = ("too weak right now" if cpu["undervoltage_now"] else
+                               "was too weak since start-up" if cpu["undervoltage_occurred"] else "fine")
     try:
         mem = {l.split(":")[0]: int(l.split()[1]) for l in open("/proc/meminfo")}
         info["memory"] = f"{(mem['MemTotal'] - mem['MemAvailable']) / 1024:.0f} MB used of {mem['MemTotal'] / 1024:.0f} MB"
@@ -1257,6 +1405,8 @@ def main():
         out(ai_resume())
     elif cmd == "zram-setup":
         out(zram_setup())
+    elif cmd == "blackbox-setup":
+        out(blackbox_setup())
     elif cmd == "diag":
         out(diag())
     elif cmd == "system-info":

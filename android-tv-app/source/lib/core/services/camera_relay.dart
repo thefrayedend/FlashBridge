@@ -7,6 +7,9 @@ import 'dart:typed_data';
 class MjpegRelay {
   final String Function() urlProvider;
   final _clients = <StreamController<Uint8List>>{};
+
+  /// How many browsers / apps are watching the stream right now.
+  int get clientCount => _clients.length;
   Uint8List? latest;
   DateTime latestAt = DateTime.fromMillisecondsSinceEpoch(0);
   HttpClient? _http;

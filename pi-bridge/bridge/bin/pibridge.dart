@@ -12,6 +12,7 @@ import 'dart:io';
 import '../src/ai_monitor.dart';
 import '../src/backup.dart';
 import '../src/printer_finder.dart';
+import '../src/blackbox.dart';
 import '../src/boot_config.dart';
 import '../src/core.dart';
 import '../src/pi_config.dart';
@@ -93,6 +94,11 @@ Future<void> main(List<String> args) async {
   await setup.start();
   if (!args.contains('--no-ai')) ai.start();
   updater.start();
+  // the black box: the system journal kept on the SD card (root helper) and a line of readings
+  // every 30 s, so the minutes before a crash can be read afterwards
+  if (sys.available) unawaited(sys.blackboxSetup().then((r) => host.log.info('Black box: ${r['message'] ?? r}')));
+  final blackBox = BlackBox(host, ai, data)..start();
+  if (blackBox.previousEnd != null) host.log.info('Black box: previous run ended around ${blackBox.previousEnd}');
   // a newer slicer engine pack (published with a bridge update) is fetched by itself
   Timer(const Duration(seconds: 90), () => unawaited(slicer.checkEngineUpdate()));
   Timer.periodic(const Duration(hours: 24), (_) => unawaited(slicer.checkEngineUpdate()));
