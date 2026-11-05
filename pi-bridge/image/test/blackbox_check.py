@@ -87,12 +87,12 @@ with open(ffsys.FSTAB_PATH, "w") as f:
     f.write("UUID=abc / ext4 defaults 0 1\nLABEL=FFBRIDGE /ffsetup vfat defaults,nofail 0 0\n")
 r = ffsys.blackbox_setup()
 check("first run: ok", r.get("ok") is True, r)
-check("first run: journal folder made, settings written, mounted, journald restarted",
+check("first run: journal folder made, settings written, mounted, journald NOT restarted (froze the bridge)",
       os.path.isdir(ffsys.JOURNAL_DIR) and open(ffsys.JOURNALD_CONF).read() == ffsys.JOURNALD_TEXT
-      and any(c[0] == "mount" and c[1] == "--bind" for c in calls) and any(c[:3] == ["systemctl", "restart", "systemd-journald"] for c in calls), (r, calls))
+      and any(c[0] == "mount" and c[1] == "--bind" for c in calls) and not any(c[:3] == ["systemctl", "restart", "systemd-journald"] for c in calls), (r, calls))
 fstab = open(ffsys.FSTAB_PATH).read()
 check("first run: fstab line added once, old lines kept", fstab.count(ffsys.JOURNAL_MOUNT) == 1 and fstab.startswith("UUID=abc") and fstab.endswith("\n"), fstab)
-check("message says what was done", "fstab line added" in r["message"] and "journald restarted" in r["message"], r["message"])
+check("message says what was done", "fstab line added" in r["message"] and "next start" in r["message"], r["message"])
 calls.clear()
 r2 = ffsys.blackbox_setup()
 check("second run: nothing to do, no mount, no restart", r2.get("ok") is True and not any(c[0] == "mount" for c in calls) and not any(c[0] == "systemctl" for c in calls) and "already" in r2["message"], (r2, calls))

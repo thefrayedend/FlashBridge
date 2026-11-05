@@ -1,0 +1,6 @@
+[Unit]
+Description=FlashBridge health check (restarts a frozen bridge)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/sbin/ffbridge-health

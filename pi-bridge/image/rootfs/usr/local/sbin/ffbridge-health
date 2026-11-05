@@ -1,0 +1,73 @@
+#!/usr/bin/python3
+"""FlashBridge health check (run every 30 s by ffbridge-health.timer, as root).
+
+If the bridge is running but its web page has not answered for 3 checks in a row (~90 s), restart
+the bridge. This covers any freeze of the bridge program (2026-11-04: Jon's box had a bridge that
+was alive but answered nothing; the box itself was fine). It never touches the printer, the AI
+service or the board - only the bridge program, which restarts in a few seconds.
+Never restarts during the bridge's first 3 minutes, so a slow start is never cut short."""
+import os, subprocess, sys, time, urllib.request
+
+STATE = "/run/ffbridge-health.fails"
+URL = "http://127.0.0.1/api/status"
+GRACE_S = 180
+LIMIT = 3
+
+
+def sh(*a):
+    return subprocess.run(list(a), capture_output=True, text=True, timeout=20)
+
+
+def active_seconds():
+    """Seconds since ffbridge became active (None when it is not active)."""
+    if sh("systemctl", "is-active", "--quiet", "ffbridge").returncode != 0:
+        return None
+    v = sh("systemctl", "show", "ffbridge", "-p", "ActiveEnterTimestampMonotonic", "--value").stdout.strip()
+    try:
+        return time.monotonic() - int(v) / 1e6
+    except ValueError:
+        return None
+
+
+def fails(n=None):
+    if n is None:
+        try:
+            return int(open(STATE).read().strip() or 0)
+        except (OSError, ValueError):
+            return 0
+    with open(STATE, "w") as f:
+        f.write(str(n))
+    return n
+
+
+def main():
+    up = active_seconds()
+    if up is None or up < GRACE_S:  # stopped on purpose, or still starting
+        fails(0)
+        return 0
+    try:
+        with urllib.request.urlopen(URL, timeout=10) as r:
+            r.read(1)
+        fails(0)
+        return 0
+    except Exception as e:  # noqa: BLE001
+        n = fails(fails() + 1)
+        msg = f"bridge page not answering ({n}/{LIMIT}): {e}"
+        if n >= LIMIT:
+            msg += " - restarting the bridge"
+            fails(0)
+            sh("logger", "-t", "ffbridge-health", msg)
+            # keep a line in the black box too, so "What happened" shows it
+            try:
+                with open("/var/lib/ffbridge/blackbox.log", "a") as f:
+                    f.write(time.strftime("%Y-%m-%dT%H:%M:%S") + " health: bridge did not answer for 90 s - restarted it\n")
+            except OSError:
+                pass
+            sh("systemctl", "restart", "ffbridge")
+        else:
+            sh("logger", "-t", "ffbridge-health", msg)
+        return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

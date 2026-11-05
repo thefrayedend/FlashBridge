@@ -11,6 +11,9 @@ WorkingDirectory=/var/lib/ffbridge
 # service back on if the bridge stopped in the middle of a slice.
 ExecStartPre=-+/usr/local/sbin/ffbridge-helper zram-setup
 ExecStartPre=-+/usr/local/sbin/ffbridge-helper ai-resume
+# The health check (restarts this service if its page stops answering for 90 s). Started from here
+# so boards that got it with an update need no 'systemctl enable'.
+ExecStartPost=-+/bin/systemctl start --no-block ffbridge-health.timer
 # If memory runs out, the slicer (oom_score_adj 1000) goes first, never the bridge.
 OOMScoreAdjust=-500
 # ...and when the slicer is stopped for memory, the bridge keeps running (systemd's default would

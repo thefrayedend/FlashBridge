@@ -156,10 +156,11 @@ def blackbox_setup():
             done.append("journald settings written")
             changed = True
         if changed:
-            # journald must reopen its files in the new place; stream connections survive a restart
-            # on systemd 246+ (these images have 249+)
-            r = run(["systemctl", "restart", "systemd-journald"], timeout=30)
-            done.append("journald restarted" if r.returncode == 0 else f"journald restart failed: {(r.stderr or '').strip()}")
+            # Do NOT restart journald here (Coordinator, 2026-11-04): this runs while the bridge is
+            # starting, and the bridge's console output goes to journald - Jon's box froze right after
+            # the first run of this step. The fstab line puts the journal on the SD card from the next
+            # boot on; until then journald keeps writing where it was.
+            done.append("journal on the SD card from the next start of the board")
         usage = run(["journalctl", "--disk-usage"]).stdout.strip()
         return {"ok": True, "message": ("; ".join(done) if done else "journal already on the SD card") + (f" ({usage})" if usage else ""),
                 "journal": _mount_source(JOURNAL_MOUNT), "var_log": _mount_source("/var/log")}
@@ -1111,6 +1112,8 @@ def set_update_state(state, message, **extra):
     with open(tmp, "w") as f:
         json.dump(d, f)
     os.replace(tmp, UPDATE_STATUS)
+    if state in ("done", "failed", "rolled-back"):
+        os.sync()
     log(f"update: {state}: {message}")
     return d
 
@@ -1240,6 +1243,9 @@ def update_run(base_url):
                 os.replace(tmp, dst)  # atomic per file: a running program keeps its old copy
 
         install(new)
+        # Put everything on the SD card NOW. The board keeps writes in memory for minutes; a power cut
+        # in that window left Jon's new web page as empty files (2026-11-04, blank page after 1.0.48).
+        os.sync()
         if any(f.startswith("etc/sudoers.d/") for f in files):
             for f in files:
                 if f.startswith("etc/sudoers.d/"):
@@ -1258,6 +1264,7 @@ def update_run(base_url):
         # roll back
         set_update_state("rolling-back", "The new version didn't start. Going back to the previous version…")
         install(prev)
+        os.sync()
         for rel in created:
             try:
                 os.remove(os.path.join(UPDATE_ROOT, rel))
