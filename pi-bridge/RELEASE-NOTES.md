@@ -19,6 +19,7 @@ setup page, Spoolman, Discord, and AI print-failure detection (Obico model, runs
 
 ## What's new
 
+- Fixed: the board could restart itself every half minute after the last update (a watchdog setting this board does not support); it is switched off.
 - Fixed: a power cut soon after an update could leave the web page blank; the board no longer freezes when its system log is busy, and restarts its own program if the page ever stops answering for 90 seconds.
 - Phone app: a new board is looked for as flashbridge.local (older boxes are still found automatically).
 - The board watches its own health: throttling and power readings in the black box, and a hardware watchdog restarts a hung box by itself (the print is never affected).
